@@ -14,6 +14,8 @@ class Draft(Base):
     __tablename__ = "drafts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # Public, non-guessable identifier used in URLs/invite links.
+    public_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), default=uuid.uuid4, unique=True, index=True)
 
     draft_type_id: Mapped[int] = mapped_column(ForeignKey("draft_types.id"), nullable=False, index=True)
 

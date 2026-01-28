@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import uuid
+
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.websocket.draft_manager import Role, draft_manager
@@ -12,9 +14,18 @@ from sqlalchemy.orm import joinedload
 router = APIRouter(tags=["ws"])
 logger = logging.getLogger("nba_draft_app.ws")
 
+def _parse_draft_ref(draft_ref: str) -> tuple[str, object]:
+    try:
+        return ("id", int(draft_ref))
+    except ValueError:
+        try:
+            return ("public_id", uuid.UUID(draft_ref))
+        except ValueError:
+            return ("invalid", draft_ref)
 
-@router.websocket("/ws/draft/{draft_id}")
-async def draft_ws(ws: WebSocket, draft_id: int, role: Role = "guest"):
+
+@router.websocket("/ws/draft/{draft_ref}")
+async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
     """
     Minimal websocket implementation:
     - connect => lobby_ready (broadcast)
@@ -22,7 +33,27 @@ async def draft_ws(ws: WebSocket, draft_id: int, role: Role = "guest"):
     - keep connection alive
     """
     await ws.accept()
-    logger.info("ws connect draft_id=%s role=%s", draft_id, role)
+    logger.info("ws connect draft_ref=%s role=%s", draft_ref, role)
+
+    # Resolve public_id -> internal numeric id so sessions are keyed consistently.
+    kind, value = _parse_draft_ref(draft_ref)
+    if kind == "invalid":
+        await ws.send_json({"type": "error", "message": "Invalid draft id"})
+        await ws.close()
+        return
+
+    async with SessionLocal() as db:
+        draft = (
+            await db.get(Draft, value)
+            if kind == "id"
+            else (await db.execute(select(Draft).where(Draft.public_id == value))).scalar_one_or_none()
+        )
+        if not draft:
+            await ws.send_json({"type": "error", "message": "Draft not found"})
+            await ws.close()
+            return
+        draft_id = draft.id
+
     session = await draft_manager.connect(draft_id, role, ws)
 
     # Rehydrate persisted state (draft status, first_turn, existing picks) so refresh doesn't reset the draft.
@@ -43,7 +74,7 @@ async def draft_ws(ws: WebSocket, draft_id: int, role: Role = "guest"):
         pick_rows = [
             {
                 "pick_number": p.pick_number,
-                "role": "host" if p.user_id == draft.host_id else "guest",
+                "role": (p.role if getattr(p, "role", None) in ("host", "guest") else ("host" if p.user_id == draft.host_id else "guest")),
                 "player_id": p.player_id,
                 "player_name": p.player.name if p.player else "",
                 "player_image_url": p.player.image_url if p.player else None,
@@ -67,6 +98,7 @@ async def draft_ws(ws: WebSocket, draft_id: int, role: Role = "guest"):
         {
             "type": "lobby_ready",
             "draft_id": draft_id,
+            "draft_public_id": str(draft.public_id),
             "connected": list(session.conns.keys()),
             "started": session.started,
             "first_turn": session.first_turn,
@@ -129,7 +161,15 @@ async def draft_ws(ws: WebSocket, draft_id: int, role: Role = "guest"):
                         continue
                     # Map websocket role -> draft participant.
                     user_id = draft.host_id if role == "host" else (draft.guest_id or draft.host_id)
-                    db.add(DraftPick(draft_id=draft_id, user_id=user_id, player_id=player_id, pick_number=pick_number))
+                    db.add(
+                        DraftPick(
+                            draft_id=draft_id,
+                            user_id=user_id,
+                            player_id=player_id,
+                            pick_number=pick_number,
+                            role=role,
+                        )
+                    )
                     await db.commit()
 
                 # Update in-memory pick list too (for newly-connected clients that rely on lobby_ready state).

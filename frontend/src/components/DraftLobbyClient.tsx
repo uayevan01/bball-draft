@@ -9,7 +9,7 @@ import { useDraftSocket } from "@/hooks/useDraftSocket";
 import { backendGet, backendPost } from "@/lib/backendClient";
 import type { Draft } from "@/lib/types";
 
-export function DraftLobbyClient({ draftId }: { draftId: number }) {
+export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
   const searchParams = useSearchParams();
   const { getToken } = useAuth();
   const defaultLocal = searchParams.get("local") === "1";
@@ -22,6 +22,8 @@ export function DraftLobbyClient({ draftId }: { draftId: number }) {
   const [searchError, setSearchError] = useState<string | null>(null);
   const [joinError, setJoinError] = useState<string | null>(null);
   const [selected, setSelected] = useState<{ id: number; name: string; image_url?: string | null } | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [inviteUrl, setInviteUrl] = useState<string>("");
 
   // Load backend user + draft so we can auto-assign roles for non-local lobbies.
   useEffect(() => {
@@ -30,7 +32,7 @@ export function DraftLobbyClient({ draftId }: { draftId: number }) {
       try {
         const token = await getToken().catch(() => null);
         const me = await backendGet<{ id: string }>("/me", token);
-        const d = await backendGet<Draft>(`/drafts/${draftId}`, token);
+        const d = await backendGet<Draft>(`/drafts/${encodeURIComponent(draftRef)}`, token);
         if (!cancelled) {
           setMyId(me.id);
           setDraft(d);
@@ -43,7 +45,7 @@ export function DraftLobbyClient({ draftId }: { draftId: number }) {
     return () => {
       cancelled = true;
     };
-  }, [draftId, getToken]);
+  }, [draftRef, getToken]);
 
   const desiredRole = useMemo<"host" | "guest">(() => {
     if (isLocal) return "host";
@@ -56,8 +58,8 @@ export function DraftLobbyClient({ draftId }: { draftId: number }) {
 
   const effectiveRole = isLocal ? role : desiredRole;
 
-  const host = useDraftSocket(draftId, "host", isLocal || effectiveRole === "host");
-  const guest = useDraftSocket(draftId, "guest", isLocal || effectiveRole === "guest");
+  const host = useDraftSocket(draftRef, "host", isLocal || effectiveRole === "host");
+  const guest = useDraftSocket(draftRef, "guest", isLocal || effectiveRole === "guest");
 
   const connectedRoles = Array.from(new Set([...(host.connectedRoles ?? []), ...(guest.connectedRoles ?? [])]));
   const firstTurn = host.firstTurn ?? guest.firstTurn;
@@ -74,7 +76,7 @@ export function DraftLobbyClient({ draftId }: { draftId: number }) {
       if (isLocal || effectiveRole !== "guest") return;
       try {
         const token = await getToken().catch(() => null);
-        const updated = await backendPost<Draft>(`/drafts/${draftId}/join`, {}, token);
+        const updated = await backendPost<Draft>(`/drafts/${encodeURIComponent(draftRef)}/join`, {}, token);
         setDraft(updated);
       } catch (e) {
         if (!cancelled) setJoinError(e instanceof Error ? e.message : "Failed to join draft");
@@ -84,7 +86,7 @@ export function DraftLobbyClient({ draftId }: { draftId: number }) {
     return () => {
       cancelled = true;
     };
-  }, [draftId, effectiveRole, getToken, isLocal]);
+  }, [draftRef, effectiveRole, getToken, isLocal]);
 
   useEffect(() => {
     let cancelled = false;
@@ -130,6 +132,7 @@ export function DraftLobbyClient({ draftId }: { draftId: number }) {
     id: number;
     name: string;
     image_url?: string | null;
+    position?: string | null;
     team_stints?: Array<{
       id: number;
       team_id: number;
@@ -142,6 +145,12 @@ export function DraftLobbyClient({ draftId }: { draftId: number }) {
   const [expandedPick, setExpandedPick] = useState<number | null>(null);
   const [detailsByPlayerId, setDetailsByPlayerId] = useState<Record<number, PlayerDetail | undefined>>({});
   const [detailsLoadingByPlayerId, setDetailsLoadingByPlayerId] = useState<Record<number, boolean | undefined>>({});
+
+  const pickedPlayerIds = useMemo(() => {
+    const ids = new Set<number>();
+    for (const p of picks) ids.add(p.player_id);
+    return Array.from(ids.values());
+  }, [picks]);
 
   async function ensurePlayerDetails(playerId: number) {
     if (detailsByPlayerId[playerId]) return;
@@ -158,13 +167,22 @@ export function DraftLobbyClient({ draftId }: { draftId: number }) {
     }
   }
 
+  // Prefetch details for drafted players so "Years active" populates without needing to expand.
+  useEffect(() => {
+    for (const pid of pickedPlayerIds) {
+      void ensurePlayerDetails(pid);
+    }
+    // ensurePlayerDetails is stable enough here; we intentionally avoid adding it to deps to prevent ref churn
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pickedPlayerIds]);
+
   function yearsActiveLabel(detail?: PlayerDetail): string {
     const stints = detail?.team_stints ?? [];
-    const years = stints.flatMap((s) => [s.start_year, s.end_year ?? s.start_year]).filter((y) => typeof y === "number");
+    const years = stints.sort((a, b) => a.start_year - b.start_year);
     if (!years.length) return "—";
-    const minY = Math.min(...years);
-    const maxY = Math.max(...years);
-    return minY === maxY ? `${minY}` : `${minY}–${maxY}`;
+    const minY = years[0];
+    const maxY = years[years.length - 1];
+    return `${minY.start_year}-${maxY.end_year || "Present"}`;
   }
 
   function PickCard({ p }: { p: (typeof picks)[number] }) {
@@ -195,6 +213,7 @@ export function DraftLobbyClient({ draftId }: { draftId: number }) {
               <div className="truncate font-semibold">
                 <span className="mr-2 text-xs font-normal text-zinc-500 dark:text-zinc-400">#{p.pick_number}</span>
                 {p.player_name}
+                {detail?.position ? <span className="ml-2 text-xs font-normal text-zinc-500 dark:text-zinc-400">{detail.position}</span> : null}
               </div>
               <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-600 dark:text-zinc-300">
                 <span>Years active: {yearsActiveLabel(detail)}</span>
@@ -225,7 +244,7 @@ export function DraftLobbyClient({ draftId }: { draftId: number }) {
                           <span className="text-zinc-700 dark:text-zinc-200">{s.team?.name ?? "Unknown team"}</span>
                         </div>
                         <div className="flex-none tabular-nums text-zinc-600 dark:text-zinc-300">
-                          {s.start_year}–{s.end_year ?? s.start_year}
+                          {s.start_year}–{s.end_year ?? "Present"}
                         </div>
                       </div>
                     ))}
@@ -252,7 +271,7 @@ export function DraftLobbyClient({ draftId }: { draftId: number }) {
     <div className="mt-6 grid gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-black/10 bg-white px-4 py-3 dark:border-white/10 dark:bg-black">
         <div className="flex flex-wrap items-center gap-3 text-sm">
-          <div className="font-mono text-xs text-zinc-500 dark:text-zinc-400">{`/draft/${draftId}`}</div>
+          <div className="font-mono text-xs text-zinc-500 dark:text-zinc-400">{`/draft/${draft?.public_id ?? draftRef}`}</div>
           <div className="text-zinc-600 dark:text-zinc-300">
             Connected: {connectedRoles.length ? connectedRoles.join(", ") : "(none)"}
           </div>
@@ -262,6 +281,35 @@ export function DraftLobbyClient({ draftId }: { draftId: number }) {
         </div>
 
         <div className="flex items-center gap-3">
+          {!isLocal ? (
+            <>
+              <button
+                type="button"
+                onClick={async () => {
+                  const url = `${window.location.origin}/draft/${draft?.public_id ?? draftRef}`;
+                  setInviteUrl(url);
+                  try {
+                    await navigator.clipboard.writeText(url);
+                    setCopied(true);
+                    window.setTimeout(() => setCopied(false), 1500);
+                  } catch {
+                    // If clipboard is blocked, at least show the URL.
+                    setCopied(false);
+                  }
+                }}
+                className="inline-flex h-10 items-center justify-center rounded-full border border-black/10 bg-white px-4 text-sm font-semibold text-zinc-950 hover:bg-black/5 dark:border-white/10 dark:bg-black dark:text-white dark:hover:bg-white/10"
+              >
+                {copied ? "Copied!" : "Copy invite link"}
+              </button>
+              {inviteUrl ? (
+                <input
+                  readOnly
+                  value={inviteUrl}
+                  className="hidden h-10 w-[360px] rounded-full border border-black/10 bg-white px-4 text-xs text-zinc-700 dark:border-white/10 dark:bg-black dark:text-zinc-200 md:block"
+                />
+              ) : null}
+            </>
+          ) : null}
           {!started && (isLocal || effectiveRole === "host") ? (
             <button
               type="button"

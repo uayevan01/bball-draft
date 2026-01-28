@@ -21,6 +21,9 @@ class DraftPick(Base):
 
     pick_number: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
 
+    # Persist role so local drafts (single user controlling both sides) can rehydrate correctly.
+    role: Mapped[str] = mapped_column(String(10), nullable=False, default="host", index=True)
+
     # Keep these as plain strings so DraftTypes can implement decade/range/team rules flexibly.
     constraint_team: Mapped[str | None] = mapped_column(String(120), nullable=True)
     constraint_year: Mapped[str | None] = mapped_column(String(40), nullable=True)

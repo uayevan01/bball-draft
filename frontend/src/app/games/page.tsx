@@ -59,7 +59,7 @@ export default async function GamesPage() {
                 <div className="text-xs text-zinc-500 dark:text-zinc-400">{new Date(g.played_at).toLocaleString()}</div>
               </div>
               <div className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
-                Draft: <a className="underline" href={`/draft/${g.draft_id}`}>{`#${g.draft_id}`}</a> • Mode:{" "}
+                Draft: <a className="underline" href={`/draft/${g.draft_id}`}>View</a> • Mode:{" "}
                 {g.game_mode ?? "—"}
               </div>
               <div className="mt-1 text-sm">

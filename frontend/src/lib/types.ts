@@ -10,6 +10,7 @@ export type DraftType = {
 
 export type Draft = {
   id: number;
+  public_id: string;
   draft_type_id: number;
   host_id: string;
   guest_id?: string | null;

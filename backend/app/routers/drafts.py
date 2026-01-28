@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +14,19 @@ from app.schemas.draft import DraftCreate, DraftOut
 from app.services.auth import get_current_user
 
 router = APIRouter(prefix="/drafts", tags=["drafts"])
+
+def _parse_draft_ref(draft_ref: str) -> tuple[str, object]:
+    """
+    Accept either numeric DB id ("123") or UUID public id.
+    Returns ("id", int) or ("public_id", uuid.UUID).
+    """
+    try:
+        return ("id", int(draft_ref))
+    except ValueError:
+        try:
+            return ("public_id", uuid.UUID(draft_ref))
+        except ValueError as e:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid draft id") from e
 
 
 @router.post("", response_model=DraftOut)
@@ -67,20 +82,18 @@ async def draft_history(
     return (await db.execute(stmt)).unique().scalars().all()
 
 
-@router.get("/{draft_id}", response_model=DraftOut)
+@router.get("/{draft_ref}", response_model=DraftOut)
 async def get_draft(
-    draft_id: int,
+    draft_ref: str,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Draft:
-    stmt = (
-        select(Draft)
-        .where(Draft.id == draft_id)
-        .options(
-            joinedload(Draft.picks).joinedload(DraftPick.player),
-            joinedload(Draft.host),
-            joinedload(Draft.guest),
-        )
+    kind, value = _parse_draft_ref(draft_ref)
+    base = select(Draft).where(Draft.id == value) if kind == "id" else select(Draft).where(Draft.public_id == value)
+    stmt = base.options(
+        joinedload(Draft.picks).joinedload(DraftPick.player),
+        joinedload(Draft.host),
+        joinedload(Draft.guest),
     )
     draft = (await db.execute(stmt)).unique().scalar_one_or_none()
     if not draft:
@@ -94,13 +107,18 @@ async def get_draft(
     return draft
 
 
-@router.post("/{draft_id}/join", response_model=DraftOut)
+@router.post("/{draft_ref}/join", response_model=DraftOut)
 async def join_draft(
-    draft_id: int,
+    draft_ref: str,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Draft:
-    draft = (await db.execute(select(Draft).where(Draft.id == draft_id))).scalar_one_or_none()
+    kind, value = _parse_draft_ref(draft_ref)
+    draft = (
+        (await db.execute(select(Draft).where(Draft.id == value)))
+        if kind == "id"
+        else (await db.execute(select(Draft).where(Draft.public_id == value)))
+    ).scalar_one_or_none()
     if not draft:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Draft not found")
 
@@ -118,7 +136,7 @@ async def join_draft(
 
     stmt = (
         select(Draft)
-        .where(Draft.id == draft_id)
+        .where(Draft.id == draft.id)
         .options(joinedload(Draft.picks), joinedload(Draft.host), joinedload(Draft.guest))
     )
     return (await db.execute(stmt)).unique().scalar_one()

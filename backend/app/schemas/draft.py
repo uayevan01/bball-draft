@@ -28,6 +28,7 @@ class DraftPickOut(ORMBaseModel):
 
 class DraftOut(ORMBaseModel):
     id: int
+    public_id: uuid.UUID
     draft_type_id: int
     host_id: uuid.UUID
     guest_id: uuid.UUID | None = None

@@ -39,7 +39,7 @@ export function DraftCreateForm({ draftTypes }: { draftTypes: DraftType[] }) {
         },
         token,
       );
-      router.push(`/draft/${draft.id}${localMode ? "?local=1" : ""}`);
+      router.push(`/draft/${draft.public_id}${localMode ? "?local=1" : ""}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to create draft.");
     } finally {

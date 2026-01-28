@@ -32,11 +32,11 @@ export default async function HistoryPage() {
           items.map((d) => (
             <a
               key={d.id}
-              href={`/draft/${d.id}`}
+              href={`/draft/${d.public_id}`}
               className="rounded-xl border border-black/10 bg-white p-4 hover:bg-black/5 dark:border-white/10 dark:bg-black dark:hover:bg-white/10"
             >
               <div className="flex items-center justify-between gap-4">
-                <div className="font-semibold">Draft #{d.id}</div>
+                <div className="font-semibold">Draft</div>
                 <div className="text-xs text-zinc-500 dark:text-zinc-400">{d.status}</div>
               </div>
               <div className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">

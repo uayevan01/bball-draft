@@ -34,7 +34,7 @@ type DraftWsMessage =
     }
   | { type: "error"; message: string };
 
-export function useDraftSocket(draftId: number, role: "host" | "guest", enabled: boolean = true) {
+export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled: boolean = true) {
   const [connectedRoles, setConnectedRoles] = useState<string[]>([]);
   const [firstTurn, setFirstTurn] = useState<string | null>(null);
   const [currentTurn, setCurrentTurn] = useState<"host" | "guest" | null>(null);
@@ -51,8 +51,8 @@ export function useDraftSocket(draftId: number, role: "host" | "guest", enabled:
 
   const wsUrl = useMemo(() => {
     const base = process.env.NEXT_PUBLIC_WS_BASE_URL ?? "ws://localhost:8000";
-    return `${base}/ws/draft/${draftId}?role=${role}`;
-  }, [draftId, role]);
+    return `${base}/ws/draft/${encodeURIComponent(draftRef)}?role=${role}`;
+  }, [draftRef, role]);
 
   useEffect(() => {
     if (!enabled) {
