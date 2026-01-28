@@ -22,6 +22,8 @@ class DraftSession:
     current_turn: Role | None = None
     pick_number: int = 0
     first_turn: Role | None = None
+    # persisted picks (rehydrated from DB on connect)
+    picks: list[dict] = field(default_factory=list)
 
     def other(self, role: Role) -> Role:
         return "guest" if role == "host" else "host"
@@ -43,6 +45,28 @@ class DraftManager:
         async with session.lock:
             session.conns[role] = ws
         return session
+
+    async def rehydrate_from_db(
+        self,
+        session: DraftSession,
+        *,
+        first_turn: Role | None,
+        pick_rows: list[dict],
+        started: bool,
+    ) -> None:
+        """
+        Restore in-memory session state from persisted DB state.
+        """
+        async with session.lock:
+            session.started = started
+            session.first_turn = first_turn
+            session.picks = pick_rows
+            session.pick_number = len(pick_rows)
+            if started and first_turn:
+                next_pick_number = session.pick_number + 1
+                session.current_turn = self._expected_role_for_pick(first=first_turn, pick_number=next_pick_number)
+            else:
+                session.current_turn = None
 
     async def disconnect(self, session: DraftSession, role: Role) -> None:
         async with session.lock:

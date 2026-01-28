@@ -3,7 +3,23 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 type DraftWsMessage =
-  | { type: "lobby_ready"; draft_id: number; connected: string[] }
+  | {
+      type: "lobby_ready";
+      draft_id: number;
+      connected: string[];
+      started?: boolean;
+      first_turn?: "host" | "guest" | null;
+      current_turn?: "host" | "guest" | null;
+      picks?: Array<{
+        pick_number: number;
+        role: "host" | "guest";
+        player_id: number;
+        player_name: string;
+        player_image_url?: string | null;
+        constraint_team?: string | null;
+        constraint_year?: string | null;
+      }>;
+    }
   | { type: "lobby_update"; draft_id: number; connected: string[] }
   | { type: "draft_started"; draft_id: number; first_turn: string }
   | {
@@ -70,6 +86,27 @@ export function useDraftSocket(draftId: number, role: "host" | "guest", enabled:
           const msg = JSON.parse(evt.data) as DraftWsMessage;
           if (msg.type === "lobby_ready" || msg.type === "lobby_update") {
             setConnectedRoles(msg.connected);
+            if (msg.type === "lobby_ready") {
+              if (typeof msg.first_turn === "string") {
+                setFirstTurn(msg.first_turn);
+              }
+              if (msg.current_turn === "host" || msg.current_turn === "guest") {
+                setCurrentTurn(msg.current_turn);
+              }
+              if (Array.isArray(msg.picks)) {
+                setPicks(
+                  msg.picks
+                    .map((p) => ({
+                      pick_number: p.pick_number,
+                      role: p.role,
+                      player_id: p.player_id,
+                      player_name: p.player_name,
+                      player_image_url: p.player_image_url ?? null,
+                    }))
+                    .sort((a, b) => a.pick_number - b.pick_number),
+                );
+              }
+            }
           } else if (msg.type === "draft_started") {
             setFirstTurn(msg.first_turn);
             setCurrentTurn(msg.first_turn as "host" | "guest");

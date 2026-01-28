@@ -26,6 +26,7 @@ export type Draft = {
 export type User = {
   id: string;
   clerk_id: string;
+  full_name?: string | null;
   username?: string | null;
   email?: string | null;
   created_at: string;

@@ -51,6 +51,7 @@ async def _get_or_create_user(
     clerk_id: str,
     email: str | None,
     username: str | None,
+    full_name: str | None,
 ) -> User:
     existing = (await db.execute(select(User).where(User.clerk_id == clerk_id))).scalar_one_or_none()
     if existing:
@@ -58,15 +59,19 @@ async def _get_or_create_user(
         if email and existing.email != email:
             existing.email = email
             changed = True
-        if username and existing.username != username:
+        # Only set username from auth claims if the user hasn't chosen one yet.
+        if username and (not existing.username or not existing.username.strip()):
             existing.username = username
+            changed = True
+        if full_name and existing.full_name != full_name:
+            existing.full_name = full_name
             changed = True
         if changed:
             await db.commit()
             await db.refresh(existing)
         return existing
 
-    user = User(clerk_id=clerk_id, email=email, username=username)
+    user = User(clerk_id=clerk_id, email=email, username=username, full_name=full_name)
     db.add(user)
     await db.commit()
     await db.refresh(user)
@@ -84,11 +89,11 @@ async def get_current_user(
 
     # If Clerk isn't configured locally, allow dev auth to work even if the frontend sends a token.
     if is_dev and settings.auth_optional_in_dev and not settings.clerk_jwks_url:
-        return await _get_or_create_user(db, clerk_id="dev_user", email=None, username="Dev User")
+        return await _get_or_create_user(db, clerk_id="dev_user", email=None, username="dev_user", full_name="Dev User")
 
     if not authorization or not authorization.lower().startswith("bearer "):
         if is_dev and settings.auth_optional_in_dev:
-            return await _get_or_create_user(db, clerk_id="dev_user", email=None, username="Dev User")
+            return await _get_or_create_user(db, clerk_id="dev_user", email=None, username="dev_user", full_name="Dev User")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing bearer token")
 
     token = authorization.split(" ", 1)[1].strip()
@@ -96,13 +101,13 @@ async def get_current_user(
         unverified_header = jwt.get_unverified_header(token)
     except jwt.PyJWTError as e:
         if is_dev and settings.auth_optional_in_dev:
-            return await _get_or_create_user(db, clerk_id="dev_user", email=None, username="Dev User")
+            return await _get_or_create_user(db, clerk_id="dev_user", email=None, username="dev_user", full_name="Dev User")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token header") from e
 
     kid = unverified_header.get("kid")
     if not kid:
         if is_dev and settings.auth_optional_in_dev:
-            return await _get_or_create_user(db, clerk_id="dev_user", email=None, username="Dev User")
+            return await _get_or_create_user(db, clerk_id="dev_user", email=None, username="dev_user", full_name="Dev User")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token missing kid")
 
     try:
@@ -122,7 +127,7 @@ async def get_current_user(
         )
     except (jwt.PyJWTError, HTTPException) as e:
         if is_dev and settings.auth_optional_in_dev:
-            return await _get_or_create_user(db, clerk_id="dev_user", email=None, username="Dev User")
+            return await _get_or_create_user(db, clerk_id="dev_user", email=None, username="dev_user", full_name="Dev User")
         if isinstance(e, HTTPException):
             raise
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from e
@@ -130,11 +135,21 @@ async def get_current_user(
     clerk_id = payload.get("sub")
     if not clerk_id:
         if is_dev and settings.auth_optional_in_dev:
-            return await _get_or_create_user(db, clerk_id="dev_user", email=None, username="Dev User")
+            return await _get_or_create_user(db, clerk_id="dev_user", email=None, username="dev_user", full_name="Dev User")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token missing subject")
 
     email = payload.get("email") or payload.get("primary_email") or None
+    # Try to derive a reasonable initial username + full name from common claim shapes.
+    full_name = payload.get("name") or payload.get("full_name") or None
+    if not full_name:
+        given = payload.get("given_name") or payload.get("first_name")
+        family = payload.get("family_name") or payload.get("last_name")
+        if given and family:
+            full_name = f"{given} {family}"
+        elif given:
+            full_name = str(given)
+
     username = payload.get("username") or payload.get("preferred_username") or None
-    return await _get_or_create_user(db, clerk_id=clerk_id, email=email, username=username)
+    return await _get_or_create_user(db, clerk_id=clerk_id, email=email, username=username, full_name=full_name)
 
 
