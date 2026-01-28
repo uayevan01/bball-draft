@@ -1,0 +1,50 @@
+# --- Cursor / IDE ---
+.cursor/
+.vscode/
+*.code-workspace
+
+# --- OS ---
+.DS_Store
+
+# --- Python ---
+.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pylint-cache/
+.coverage
+htmlcov/
+
+# --- Env / secrets ---
+.env
+.env.*
+!.env.example
+!.env.local.example
+
+# --- Backend artifacts ---
+backend/.env
+backend/*.log
+
+# --- Node / Next.js ---
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.turbo/
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/pnpm-debug.log*
+frontend/.env.local
+
+# --- Docker ---
+**/.dockerignore
+
+# --- DB / local data ---
+*.sqlite
+*.db
+
+.npm-cache/
+.npm-logs/

@@ -1,0 +1,30 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: nba_draft
+    ports:
+      - "5433:5432"
+    volumes:
+      - nba_draft_pgdata:/var/lib/postgresql/data
+
+  backend:
+    build:
+      context: ./backend
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/nba_draft
+      # Leave empty in dev to allow any localhost port via allow_origin_regex (see backend/app/main.py)
+      CORS_ALLOW_ORIGINS: ""
+      APP_ENV: dev
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+
+volumes:
+  nba_draft_pgdata:
+
+
+

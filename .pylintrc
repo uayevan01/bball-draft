@@ -1,0 +1,35 @@
+[MASTER]
+# Ensure `from app...` imports resolve when running pylint from repo root.
+init-hook='import sys; sys.path.append("backend")'
+persistent=no
+
+[FORMAT]
+max-line-length=120
+
+[MESSAGES CONTROL]
+disable=
+    missing-module-docstring,
+    missing-class-docstring,
+    missing-function-docstring,
+
+    # Pylint is noisy for ORMs/typed relationship stubs; we keep runtime safety via tests + type hints.
+    too-few-public-methods,
+
+    # Common false-positives with Pydantic + SQLAlchemy dynamic members.
+    no-member,
+    not-callable,
+
+    # Keep signal high; FastAPI endpoints naturally have many parameters/locals.
+    too-many-arguments,
+    too-many-locals,
+
+    # Style noise (optional).
+    line-too-long,
+    trailing-newlines,
+    redefined-outer-name,
+
+[TYPECHECK]
+# Pydantic & SQLAlchemy generate attributes dynamically; avoid false positives.
+ignored-classes=SQLAlchemy,BaseModel
+
+
