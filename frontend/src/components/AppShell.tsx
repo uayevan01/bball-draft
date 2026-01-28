@@ -3,8 +3,8 @@ import { UserButton } from "@clerk/nextjs";
 
 export function AppShell({ children, wide }: { children: React.ReactNode; wide?: boolean }) {
   return (
-    <div className="min-h-screen bg-zinc-50 text-zinc-950 dark:bg-black dark:text-zinc-50">
-      <header className="border-b border-black/10 dark:border-white/10">
+    <div className="min-h-screen bg-zinc-50 text-zinc-950 dark:bg-zinc-950 dark:text-zinc-50">
+      <header className="border-b border-black/10 dark:border-white/10 dark:bg-zinc-950/60">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
           <div className="flex items-center gap-4">
             <Link href="/" className="font-semibold tracking-tight">

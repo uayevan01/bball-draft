@@ -95,7 +95,6 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
       const term = q.trim();
       if (!term) {
         setResults([]);
-        setSelected(null);
         return;
       }
       try {
@@ -198,7 +197,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
           setExpandedPick(next);
           if (!isExpanded) void ensurePlayerDetails(p.player_id);
         }}
-        className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-left text-sm hover:bg-black/5 dark:border-white/10 dark:bg-black dark:hover:bg-white/10"
+        className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-left text-sm hover:bg-black/5 dark:border-white/10 dark:bg-zinc-900/60 dark:hover:bg-zinc-900/80"
       >
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
@@ -207,7 +206,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
               alt={p.player_name}
               width={36}
               height={36}
-              className="h-9 w-9 flex-none rounded-full object-cover"
+              className="h-14 w-12 flex-none rounded-full object-cover"
             />
             <div className="min-w-0">
               <div className="truncate font-semibold">
@@ -238,7 +237,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
                     .map((s) => (
                       <div key={s.id} className="flex items-center justify-between gap-3">
                         <div className="min-w-0 truncate">
-                          <span className="mr-2 inline-flex items-center rounded-full border border-black/10 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-900 dark:border-white/10 dark:bg-black dark:text-white">
+                          <span className="mr-2 inline-flex items-center rounded-full border border-black/10 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-900 dark:border-white/10 dark:bg-zinc-900 dark:text-white">
                             {s.team?.abbreviation ?? "—"}
                           </span>
                           <span className="text-zinc-700 dark:text-zinc-200">{s.team?.name ?? "Unknown team"}</span>
@@ -269,7 +268,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
 
   return (
     <div className="mt-6 grid gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-black/10 bg-white px-4 py-3 dark:border-white/10 dark:bg-black">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-black/10 bg-white px-4 py-3 dark:border-white/10 dark:bg-zinc-900/50">
         <div className="flex flex-wrap items-center gap-3 text-sm">
           <div className="font-mono text-xs text-zinc-500 dark:text-zinc-400">{`/draft/${draft?.public_id ?? draftRef}`}</div>
           <div className="text-zinc-600 dark:text-zinc-300">
@@ -297,7 +296,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
                     setCopied(false);
                   }
                 }}
-                className="inline-flex h-10 items-center justify-center rounded-full border border-black/10 bg-white px-4 text-sm font-semibold text-zinc-950 hover:bg-black/5 dark:border-white/10 dark:bg-black dark:text-white dark:hover:bg-white/10"
+                className="inline-flex h-10 items-center justify-center rounded-full border border-black/10 bg-white px-4 text-sm font-semibold text-zinc-950 hover:bg-black/5 dark:border-white/10 dark:bg-zinc-900 dark:text-white dark:hover:bg-zinc-800"
               >
                 {copied ? "Copied!" : "Copy invite link"}
               </button>
@@ -305,7 +304,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
                 <input
                   readOnly
                   value={inviteUrl}
-                  className="hidden h-10 w-[360px] rounded-full border border-black/10 bg-white px-4 text-xs text-zinc-700 dark:border-white/10 dark:bg-black dark:text-zinc-200 md:block"
+                  className="hidden h-10 w-[360px] rounded-full border border-black/10 bg-white px-4 text-xs text-zinc-700 dark:border-white/10 dark:bg-zinc-900 dark:text-zinc-200 md:block"
                 />
               ) : null}
             </>
@@ -330,7 +329,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
       ) : null}
 
       {!started ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-black/10 bg-white px-4 py-3 text-sm dark:border-white/10 dark:bg-black">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-black/10 bg-white px-4 py-3 text-sm dark:border-white/10 dark:bg-zinc-900/50">
           <label className="flex items-center gap-2">
             <input type="checkbox" checked={isLocal} onChange={(e) => setIsLocal(e.target.checked)} />
             Local 2-player mode (host + guest on this device)
@@ -346,7 +345,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
       ) : null}
 
       <div className="grid gap-4 lg:grid-cols-3">
-        <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-black">
+        <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-900/50">
           <div className="flex items-baseline justify-between gap-3">
             <div className="flex items-center gap-2 text-sm font-semibold">
               <span>{displayName("host")}</span>
@@ -369,7 +368,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
           </div>
         </div>
 
-        <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-black">
+        <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-900/50">
           {!started ? (
             <div className="text-sm text-zinc-600 dark:text-zinc-300">
               Waiting for the draft to start. The host will start the draft.
@@ -377,15 +376,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
           ) : (
             <>
               <div className="text-sm font-semibold">Pick a player</div>
-              <div className="mt-3 grid gap-2">
-                <input
-                  className="h-11 rounded-xl border border-black/10 bg-white px-3 text-sm dark:border-white/10 dark:bg-black"
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                  placeholder="Search player name…"
-                />
-                {searchError ? <div className="text-sm text-red-700 dark:text-red-300">{searchError}</div> : null}
-
+              <div className="mt-3 grid gap-3">
                 {selected ? (
                   <div className="rounded-xl border border-black/10 bg-black/5 p-3 dark:border-white/10 dark:bg-white/10">
                     <div className="flex items-center justify-between gap-3">
@@ -399,14 +390,13 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
                         />
                         <div className="min-w-0">
                           <div className="truncate text-sm font-semibold">{selected.name}</div>
-                          <div className="text-xs text-zinc-600 dark:text-zinc-300">Click confirm to make the pick.</div>
                         </div>
                       </div>
                       <div className="flex flex-none items-center gap-2">
                         <button
                           type="button"
                           onClick={() => setSelected(null)}
-                          className="h-10 rounded-full border border-black/10 bg-white px-3 text-sm font-semibold text-zinc-950 hover:bg-black/5 dark:border-white/10 dark:bg-black dark:text-white dark:hover:bg-white/10"
+                          className="h-10 rounded-full border border-black/10 bg-white px-3 text-sm font-semibold text-zinc-950 hover:bg-black/5 dark:border-white/10 dark:bg-zinc-900 dark:text-white dark:hover:bg-zinc-800"
                         >
                           Clear
                         </button>
@@ -417,8 +407,6 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
                             if (!selected) return;
                             pickSocket.makePick(selected.id);
                             setSelected(null);
-                            setQ("");
-                            setResults([]);
                           }}
                           className="h-10 rounded-full bg-zinc-950 px-4 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-60 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
                         >
@@ -433,6 +421,14 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
                     ) : null}
                   </div>
                 ) : null}
+
+                <input
+                  className="h-11 rounded-xl border border-black/10 bg-white px-3 text-sm dark:border-white/10 dark:bg-zinc-900/60"
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder="Search player name…"
+                />
+                {searchError ? <div className="text-sm text-red-700 dark:text-red-300">{searchError}</div> : null}
 
                 <div className="grid gap-2">
                   {results.map((p) => (
@@ -464,7 +460,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
           )}
         </div>
 
-        <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-black">
+        <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-900/50">
           <div className="flex items-baseline justify-between gap-3">
             <div className="flex items-center gap-2 text-sm font-semibold">
               <span>{displayName("guest")}</span>
