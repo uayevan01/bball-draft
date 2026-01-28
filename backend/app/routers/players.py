@@ -3,10 +3,11 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 
 from app.database import get_db
-from app.models import Player
-from app.schemas.player import PlayerOut
+from app.models import Player, PlayerTeamStint
+from app.schemas.player import PlayerDetailOut, PlayerOut
 
 router = APIRouter(prefix="/players", tags=["players"])
 
@@ -34,6 +35,19 @@ async def list_players(
 @router.get("/{player_id}", response_model=PlayerOut)
 async def get_player(player_id: int, db: AsyncSession = Depends(get_db)) -> Player:
     player = (await db.execute(select(Player).where(Player.id == player_id))).scalar_one_or_none()
+    if not player:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Player not found")
+    return player
+
+
+@router.get("/{player_id}/details", response_model=PlayerDetailOut)
+async def get_player_details(player_id: int, db: AsyncSession = Depends(get_db)) -> Player:
+    stmt = (
+        select(Player)
+        .where(Player.id == player_id)
+        .options(joinedload(Player.team_stints).joinedload(PlayerTeamStint.team))
+    )
+    player = (await db.execute(stmt)).unique().scalar_one_or_none()
     if not player:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Player not found")
     return player

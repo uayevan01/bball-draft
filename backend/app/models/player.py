@@ -28,6 +28,8 @@ class Player(Base):
     retirement_year: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     position: Mapped[str | None] = mapped_column(String(30), nullable=True, index=True)
     stints_scraped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    image_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    image_scraped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
 
     drafted_team: Mapped["Team | None"] = relationship("Team", back_populates="drafted_players")
     draft_picks: Mapped[list["DraftPick"]] = relationship("DraftPick", back_populates="player")

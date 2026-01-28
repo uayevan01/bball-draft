@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from pydantic import Field
+
 from app.schemas.base import ORMBaseModel
+from app.schemas.player_team_stint import PlayerTeamStintWithTeamOut
 
 
 class PlayerOut(ORMBaseModel):
@@ -13,5 +16,10 @@ class PlayerOut(ORMBaseModel):
     team_id: int | None = None
     retirement_year: int | None = None
     position: str | None = None
+    image_url: str | None = None
+
+
+class PlayerDetailOut(PlayerOut):
+    team_stints: list[PlayerTeamStintWithTeamOut] = Field(default_factory=list)
 
 

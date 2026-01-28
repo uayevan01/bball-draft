@@ -5,7 +5,7 @@ import asyncio
 from collections.abc import Sequence
 from datetime import datetime, timezone
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 
 from app.database import SessionLocal
@@ -367,12 +367,14 @@ async def upsert_player_team_stints(
     async with SessionLocal() as session:
         abbr_to_team_id = await _team_abbr_map(session)
 
-        # Resume by default: only process players we haven't attempted yet.
+        # Resume by default:
+        # - process players we haven't attempted stints for
+        # - OR players we haven't attempted image scraping for
         stmt = select(Player.id, Player.bref_id).where(Player.bref_id.is_not(None))
         if bref_id:
             stmt = stmt.where(Player.bref_id == bref_id)
         elif not force:
-            stmt = stmt.where(Player.stints_scraped_at.is_(None))
+            stmt = stmt.where(or_(Player.stints_scraped_at.is_(None), Player.image_scraped_at.is_(None)))
         stmt = stmt.order_by(Player.id.asc())
         if limit:
             stmt = stmt.limit(limit)
@@ -382,7 +384,7 @@ async def upsert_player_team_stints(
 
         async def _one(player_id: int, bref_id: str) -> list[dict]:
             async with sem:
-                seasons = await scrape_player_team_seasons(bref_id)
+                seasons, headshot_url = await scrape_player_team_seasons(bref_id)
                 stints = seasons_to_stints(bref_id, seasons)
                 out: list[dict] = []
                 for s in stints:
@@ -399,6 +401,8 @@ async def upsert_player_team_stints(
                             "end_year": s.end_year,
                         }
                     )
+                if headshot_url:
+                    out.append({"player_id": player_id, "image_url": headshot_url})
                 return out
 
         total_processed_players = 0
@@ -411,6 +415,7 @@ async def upsert_player_team_stints(
 
         # Incremental commit so you can restart safely.
         batch_values: list[dict] = []
+        batch_image_updates: dict[int, str] = {}
         batch_player_ids: list[int] = []
         commit_every_players = max(1, commit_every_players)
 
@@ -419,7 +424,12 @@ async def upsert_player_team_stints(
             if not bref_id:
                 continue
             try:
-                batch_values.extend(await _one(player_id, bref_id))
+                values = await _one(player_id, bref_id)
+                for v in values:
+                    if "image_url" in v:
+                        batch_image_updates[player_id] = v["image_url"]
+                    else:
+                        batch_values.append(v)
                 batch_player_ids.append(player_id)
             except Exception as e:  # pylint: disable=broad-exception-caught
                 errors += 1
@@ -442,15 +452,24 @@ async def upsert_player_team_stints(
                     )
                     await session.execute(stmt_ins)
                     total_inserted_stints += len(batch_values)
+                if batch_image_updates:
+                    for pid, url in batch_image_updates.items():
+                        await session.execute(
+                            update(Player).where(Player.id == pid).values(image_url=url)
+                        )
                 # Mark players as attempted (even if they had 0 stints); this enables true resume.
                 await session.execute(
                     update(Player)
                     .where(Player.id.in_(batch_player_ids))
-                    .values(stints_scraped_at=datetime.now(timezone.utc))
+                    .values(
+                        stints_scraped_at=datetime.now(timezone.utc),
+                        image_scraped_at=datetime.now(timezone.utc),
+                    )
                 )
                 await session.commit()
                 total_processed_players += len(batch_player_ids)
                 batch_values.clear()
+                batch_image_updates.clear()
                 batch_player_ids.clear()
 
         # Flush tail
@@ -463,10 +482,16 @@ async def upsert_player_team_stints(
                 )
                 await session.execute(stmt_ins)
                 total_inserted_stints += len(batch_values)
+            if batch_image_updates:
+                for pid, url in batch_image_updates.items():
+                    await session.execute(update(Player).where(Player.id == pid).values(image_url=url))
             await session.execute(
                 update(Player)
                 .where(Player.id.in_(batch_player_ids))
-                .values(stints_scraped_at=datetime.now(timezone.utc))
+                .values(
+                    stints_scraped_at=datetime.now(timezone.utc),
+                    image_scraped_at=datetime.now(timezone.utc),
+                )
             )
             await session.commit()
             total_processed_players += len(batch_player_ids)

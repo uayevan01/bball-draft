@@ -298,7 +298,7 @@ def _season_text_to_start_year(season_text: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
-async def scrape_player_team_seasons(bref_id: str) -> dict[int, str]:
+async def scrape_player_team_seasons(bref_id: str) -> tuple[dict[int, str], str | None]:
     """
     Returns mapping: season_start_year -> team_abbreviation (best-effort).
 
@@ -312,6 +312,14 @@ async def scrape_player_team_seasons(bref_id: str) -> dict[int, str]:
         html = await _get(client, url)
 
     soup = BeautifulSoup(html, "lxml")
+    headshot_url = None
+    img = soup.select_one("div#meta img")
+    if img and img.get("src"):
+        headshot_url = str(img.get("src"))
+        if headshot_url.startswith("//"):
+            headshot_url = "https:" + headshot_url
+        elif headshot_url.startswith("/"):
+            headshot_url = _BREF_BASE + headshot_url
     # Basketball Reference has been rolling out "Upgraded stats tables" which use different IDs/columns.
     # Prefer per-game, then fall back to totals.
     table = None
@@ -320,7 +328,7 @@ async def scrape_player_team_seasons(bref_id: str) -> dict[int, str]:
         if table is not None:
             break
     if table is None:
-        return {}
+        return {}, headshot_url
 
     # For each season, choose best team based on max games (exclude TOT).
     best: dict[int, tuple[str, int]] = {}  # season_start -> (team_abbr, games)
@@ -357,7 +365,8 @@ async def scrape_player_team_seasons(bref_id: str) -> dict[int, str]:
         if current is None or games >= current[1]:
             best[start_year] = (team_abbr.upper(), games)
 
-    return {season: team for season, (team, _games) in best.items()}
+    seasons = {season: team for season, (team, _games) in best.items()}
+    return seasons, headshot_url
 
 
 def seasons_to_stints(bref_id: str, seasons: dict[int, str]) -> list[BRefPlayerStintRow]:

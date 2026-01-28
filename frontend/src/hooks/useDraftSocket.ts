@@ -13,6 +13,7 @@ type DraftWsMessage =
       role: "host" | "guest";
       player_id: number;
       player_name: string;
+      player_image_url?: string | null;
       next_turn: "host" | "guest";
     }
   | { type: "error"; message: string };
@@ -21,9 +22,9 @@ export function useDraftSocket(draftId: number, role: "host" | "guest", enabled:
   const [connectedRoles, setConnectedRoles] = useState<string[]>([]);
   const [firstTurn, setFirstTurn] = useState<string | null>(null);
   const [currentTurn, setCurrentTurn] = useState<"host" | "guest" | null>(null);
-  const [picks, setPicks] = useState<Array<{ pick_number: number; role: "host" | "guest"; player_id: number; player_name: string }>>(
-    [],
-  );
+  const [picks, setPicks] = useState<
+    Array<{ pick_number: number; role: "host" | "guest"; player_id: number; player_name: string; player_image_url?: string | null }>
+  >([]);
   const [lastError, setLastError] = useState<string | null>(null);
   const [status, setStatus] = useState<"disabled" | "connecting" | "open" | "closed">(
     enabled ? "connecting" : "disabled",
@@ -77,7 +78,13 @@ export function useDraftSocket(draftId: number, role: "host" | "guest", enabled:
           } else if (msg.type === "pick_made") {
             setPicks((prev) => [
               ...prev.filter((p) => p.pick_number !== msg.pick_number),
-              { pick_number: msg.pick_number, role: msg.role, player_id: msg.player_id, player_name: msg.player_name },
+              {
+                pick_number: msg.pick_number,
+                role: msg.role,
+                player_id: msg.player_id,
+                player_name: msg.player_name,
+                player_image_url: msg.player_image_url ?? null,
+              },
             ].sort((a, b) => a.pick_number - b.pick_number));
             setCurrentTurn(msg.next_turn);
           }

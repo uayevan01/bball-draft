@@ -83,6 +83,7 @@ async def draft_ws(ws: WebSocket, draft_id: int, role: Role = "guest"):
                         "role": role,
                         "player_id": player_id,
                         "player_name": player.name,
+                        "player_image_url": player.image_url,
                         "next_turn": next_turn,
                     },
                 )
