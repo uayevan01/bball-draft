@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
 
@@ -9,6 +8,12 @@ import { useDraftSocket } from "@/hooks/useDraftSocket";
 import { backendGet, backendPost } from "@/lib/backendClient";
 import type { Draft } from "@/lib/types";
 import type { DraftRules } from "@/lib/draftRules";
+import { DraftLobbyHeader } from "@/components/draft-lobby/DraftLobbyHeader";
+import { DraftSideColumn } from "@/components/draft-lobby/DraftSideColumn";
+import { MainInfoCard } from "@/components/draft-lobby/MainInfoCard";
+import { PickCard } from "@/components/draft-lobby/PickCard";
+import { PlayerPickerPanel } from "@/components/draft-lobby/PlayerPickerPanel";
+import type { DraftPickWs, PlayerDetail, PlayerSearchResult, RollConstraint, SpinPreviewTeam } from "@/components/draft-lobby/types";
 
 export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
   const searchParams = useSearchParams();
@@ -19,21 +24,17 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
   const [myId, setMyId] = useState<string | null>(null);
   const [role] = useState<"host" | "guest">("host");
   const [q, setQ] = useState("");
-  const [results, setResults] = useState<Array<{ id: number; name: string; image_url?: string | null }>>([]);
+  const [results, setResults] = useState<PlayerSearchResult[]>([]);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [joinError, setJoinError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<{ id: number; name: string; image_url?: string | null } | null>(null);
+  const [selected, setSelected] = useState<PlayerSearchResult | null>(null);
   const [copied, setCopied] = useState(false);
   const [inviteUrl, setInviteUrl] = useState<string>("");
   const [rules, setRules] = useState<DraftRules | null>(null);
 
   // Roll/constraint state comes from the websocket so both players see the same spinner + result.
   const [spinPreviewDecade, setSpinPreviewDecade] = useState<string | null>(null);
-  const [spinPreviewTeam, setSpinPreviewTeam] = useState<{
-    name: string;
-    abbreviation?: string | null;
-    logo_url?: string | null;
-  } | null>(null);
+  const [spinPreviewTeam, setSpinPreviewTeam] = useState<SpinPreviewTeam | null>(null);
 
   // Load backend user + draft so we can auto-assign roles for non-local lobbies.
   useEffect(() => {
@@ -116,7 +117,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
 
   const rollStage = stateSocket.rollStage;
   const rollStageDecadeLabel = stateSocket.rollStageDecadeLabel;
-  const rollConstraint = stateSocket.rollConstraint;
+  const rollConstraint = stateSocket.rollConstraint as RollConstraint | null;
   const onlyEligible = stateSocket.onlyEligible;
   const draftName = stateSocket.draftName ?? draft?.name ?? null;
 
@@ -170,7 +171,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
           params.set("stint_start_year", String(rollConstraint.decadeStart));
           params.set("stint_end_year", String(rollConstraint.decadeEnd));
         }
-        const data = await backendGet<Array<{ id: number; name: string; image_url?: string | null }>>(`/players?${params.toString()}`);
+        const data = await backendGet<PlayerSearchResult[]>(`/players?${params.toString()}`);
         if (!cancelled) setResults(data);
       } catch (e) {
         if (!cancelled) setSearchError(e instanceof Error ? e.message : "Search failed");
@@ -328,20 +329,6 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
   const hostPicks = picks.filter((p) => p.role === "host");
   const guestPicks = picks.filter((p) => p.role === "guest");
 
-  type PlayerDetail = {
-    id: number;
-    name: string;
-    image_url?: string | null;
-    position?: string | null;
-    team_stints?: Array<{
-      id: number;
-      team_id: number;
-      start_year: number;
-      end_year?: number | null;
-      team?: { id: number; name: string; abbreviation?: string | null; logo_url?: string | null } | null;
-    }>;
-  };
-
   const [expandedPick, setExpandedPick] = useState<number | null>(null);
   const [detailsByPlayerId, setDetailsByPlayerId] = useState<Record<number, PlayerDetail | undefined>>({});
   const [detailsLoadingByPlayerId, setDetailsLoadingByPlayerId] = useState<Record<number, boolean | undefined>>({});
@@ -419,102 +406,6 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
     return `${minY.start_year}-${maxY.end_year || "Present"}`;
   }
 
-  function PickCard({ p }: { p: (typeof picks)[number] }) {
-    const isExpanded = expandedPick === p.pick_number;
-    const detail = detailsByPlayerId[p.player_id];
-    const loading = Boolean(detailsLoadingByPlayerId[p.player_id]);
-
-    return (
-      <button
-        type="button"
-        onClick={() => {
-          const next = isExpanded ? null : p.pick_number;
-          setExpandedPick(next);
-          if (!isExpanded) void ensurePlayerDetails(p.player_id);
-        }}
-        className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-left text-sm hover:bg-black/5 dark:border-white/10 dark:bg-zinc-900/60 dark:hover:bg-zinc-900/80"
-      >
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-3">
-            <Image
-              src={p.player_image_url ?? "/avatar-placeholder.svg"}
-              alt={p.player_name}
-              width={36}
-              height={36}
-              className="h-14 w-12 flex-none rounded-full object-cover"
-            />
-            <div className="min-w-0">
-              <div className="truncate font-semibold">
-                <span className="mr-2 text-xs font-normal text-zinc-500 dark:text-zinc-400">#{p.pick_number}</span>
-                {p.player_name}
-                {detail?.position ? <span className="ml-2 text-xs font-normal text-zinc-500 dark:text-zinc-400">{detail.position}</span> : null}
-              </div>
-              <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-600 dark:text-zinc-300">
-                <span>Years active: {yearsActiveLabel(detail)}</span>
-                <span>
-                  Constraints:{" "}
-                  {p.constraint_year || p.constraint_team ? (
-                    <span className="text-zinc-950 dark:text-white">
-                      {[p.constraint_year, p.constraint_team].filter(Boolean).join(" • ")}
-                    </span>
-                  ) : (
-                    "—"
-                  )}
-                </span>
-              </div>
-            </div>
-          </div>
-          <div className="flex-none text-xs text-zinc-500 dark:text-zinc-400">{isExpanded ? "Hide" : "Details"}</div>
-        </div>
-
-        {isExpanded ? (
-          <div className="mt-3 rounded-lg border border-black/10 bg-black/5 p-3 text-xs dark:border-white/10 dark:bg-white/10">
-            {loading ? (
-              <div className="text-zinc-600 dark:text-zinc-300">Loading player history…</div>
-            ) : detail?.team_stints?.length ? (
-              <div className="grid gap-2">
-                <div className="text-xs font-semibold text-zinc-700 dark:text-zinc-200">Team history</div>
-                <div className="grid gap-1">
-                  {detail.team_stints
-                    .slice()
-                    .sort((a, b) => a.start_year - b.start_year)
-                    .map((s) => (
-                      <div key={s.id} className="flex items-center justify-between gap-3">
-                        <div className="min-w-0 truncate">
-                          <span className="mr-2 inline-flex items-center gap-2 align-middle">
-                            {s.team?.logo_url ? (
-                              <Image
-                                src={s.team.logo_url}
-                                alt={s.team?.abbreviation ?? "Team logo"}
-                                width={18}
-                                height={18}
-                                className="h-[18px] w-[18px] rounded-sm object-contain"
-                              />
-                            ) : null}
-                            <span className="inline-flex items-center rounded-full border border-black/10 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-900 dark:border-white/10 dark:bg-zinc-900 dark:text-white">
-                              {s.team?.abbreviation ?? "—"}
-                            </span>
-                          </span>
-                          <span className="text-zinc-700 dark:text-zinc-200">{s.team?.name ?? "Unknown team"}</span>
-                        </div>
-                        <div className="flex-none tabular-nums text-zinc-600 dark:text-zinc-300">
-                          {s.start_year}–{s.end_year ?? "Present"}
-                        </div>
-                      </div>
-                    ))}
-                </div>
-              </div>
-            ) : (
-              <div className="text-zinc-600 dark:text-zinc-300">
-                No team history found yet. (This will populate as stints finish scraping.)
-              </div>
-            )}
-          </div>
-        ) : null}
-      </button>
-    );
-  }
-
   function isYourTurnForSide(side: "host" | "guest"): boolean {
     if (!currentTurn) return false;
     if (currentTurn !== side) return false;
@@ -523,106 +414,44 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
 
   return (
     <div className="mt-6 grid gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-black/10 bg-white px-4 py-3 dark:border-white/10 dark:bg-zinc-900/50">
-        <div className="flex flex-wrap items-center gap-3 text-sm">
-          <div className="flex items-center gap-2">
-            {draftNameEditing ? (
-              <>
-                <input
-                  value={draftNameInput}
-                  onChange={(e) => setDraftNameInput(e.target.value)}
-                  className="h-9 w-[220px] rounded-full border border-black/10 bg-white px-3 text-sm font-semibold text-zinc-950 dark:border-white/10 dark:bg-zinc-900 dark:text-white"
-                  placeholder="Draft name…"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    const next = draftNameInput.trim();
-                    if (!next) return;
-                    host.setDraftNameValue(next);
-                    setDraftNameEditing(false);
-                  }}
-                  className="h-9 rounded-full bg-zinc-950 px-3 text-sm font-semibold text-white hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
-                >
-                  Save
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setDraftNameEditing(false)}
-                  className="h-9 rounded-full border border-black/10 bg-white px-3 text-sm font-semibold text-zinc-950 hover:bg-black/5 dark:border-white/10 dark:bg-zinc-900 dark:text-white dark:hover:bg-zinc-800"
-                >
-                  Cancel
-                </button>
-              </>
-            ) : (
-              <>
-                <div className="text-sm font-semibold text-zinc-950 dark:text-white">{draftName || "Draft"}</div>
-                {(isLocal || effectiveRole === "host") ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDraftNameInput(draftName || "");
-                      setDraftNameEditing(true);
-                    }}
-                    className="text-xs text-zinc-600 hover:underline dark:text-zinc-300"
-                  >
-                    Rename
-                  </button>
-                ) : null}
-              </>
-            )}
-          </div>
-          <div className="font-mono text-xs text-zinc-500 dark:text-zinc-400">{`/draft/${draft?.public_id ?? draftRef}`}</div>
-          <div className="text-zinc-600 dark:text-zinc-300">
-            Connected: {connectedRoles.length ? connectedRoles.join(", ") : "(none)"}
-          </div>
-          <div className="text-zinc-600 dark:text-zinc-300">
-            Turn: <span className="font-semibold text-zinc-950 dark:text-white">{currentTurn ?? "—"}</span>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3">
-          {!isLocal ? (
-            <>
-              <button
-                type="button"
-                onClick={async () => {
-                  const url = `${window.location.origin}/draft/${draft?.public_id ?? draftRef}`;
-                  setInviteUrl(url);
-                  try {
-                    await navigator.clipboard.writeText(url);
-                    setCopied(true);
-                    window.setTimeout(() => setCopied(false), 1500);
-                  } catch {
-                    // If clipboard is blocked, at least show the URL.
-                    setCopied(false);
-                  }
-                }}
-                className="inline-flex h-10 items-center justify-center rounded-full border border-black/10 bg-white px-4 text-sm font-semibold text-zinc-950 hover:bg-black/5 dark:border-white/10 dark:bg-zinc-900 dark:text-white dark:hover:bg-zinc-800"
-              >
-                {copied ? "Copied!" : "Copy invite link"}
-              </button>
-              {inviteUrl ? (
-                <input
-                  readOnly
-                  value={inviteUrl}
-                  className="hidden h-10 w-[360px] rounded-full border border-black/10 bg-white px-4 text-xs text-zinc-700 dark:border-white/10 dark:bg-zinc-900 dark:text-zinc-200 md:block"
-                />
-              ) : null}
-            </>
-          ) : null}
-          {!started && (isLocal || effectiveRole === "host") ? (
-            <button
-              type="button"
-              onClick={() => host.startDraft()}
-              disabled={host.status !== "open"}
-              className="inline-flex h-10 items-center justify-center rounded-full bg-zinc-950 px-4 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-60 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
-            >
-              Start draft
-            </button>
-          ) : null}
-        </div>
-      </div>
+      <DraftLobbyHeader
+        draftName={draftName}
+        canRename={isLocal || effectiveRole === "host"}
+        isEditing={draftNameEditing}
+        draftNameInput={draftNameInput}
+        onChangeDraftNameInput={setDraftNameInput}
+        onStartEdit={() => {
+          setDraftNameInput(draftName || "");
+          setDraftNameEditing(true);
+        }}
+        onCancelEdit={() => setDraftNameEditing(false)}
+        onSaveDraftName={() => {
+          const next = draftNameInput.trim();
+          if (!next) return;
+          host.setDraftNameValue(next);
+          setDraftNameEditing(false);
+        }}
+        draftPathText={`/draft/${draft?.public_id ?? draftRef}`}
+        connectedText={`Connected: ${connectedRoles.length ? connectedRoles.join(", ") : "(none)"}`}
+        currentTurnText={`Turn: ${currentTurn ?? "—"}`}
+        showInvite={!isLocal}
+        copied={copied}
+        inviteUrl={inviteUrl}
+        onCopyInvite={async () => {
+          const url = `${window.location.origin}/draft/${draft?.public_id ?? draftRef}`;
+          setInviteUrl(url);
+          try {
+            await navigator.clipboard.writeText(url);
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 1500);
+          } catch {
+            setCopied(false);
+          }
+        }}
+        showStartDraft={!started && (isLocal || effectiveRole === "host")}
+        startDraftDisabled={host.status !== "open"}
+        onStartDraft={() => host.startDraft()}
+      />
 
       {lastError || joinError ? (
         <div className="rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300">
@@ -630,92 +459,23 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
         </div>
       ) : null}
 
-      {/* Main info box (roll + status). */}
       {started ? (
-        <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-900/50">
-          <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-center">
-            <div className="min-w-0 text-center md:text-left">
-              <div className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">Current turn</div>
-              <div className="mt-1 text-sm font-semibold text-zinc-950 dark:text-white">
-                {currentTurn ? displayName(currentTurn) : "—"}
-                {isLocal ? <span className="ml-2 text-xs font-normal text-zinc-500 dark:text-zinc-400">(local)</span> : null}
-              </div>
-              {infoMessage ? (
-                <div className="mt-2 text-sm text-zinc-700 dark:text-zinc-200">{infoMessage}</div>
-              ) : null}
-            </div>
-
-            <div className="flex flex-none items-center justify-center gap-2 md:justify-end">
-              {needsConstraint && canPick ? (
-                <button
-                  type="button"
-                  onClick={() => pickSocket.roll()}
-                  disabled={isSpinning}
-                  className="h-10 rounded-full bg-zinc-950 px-4 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-60 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
-                >
-                  {rollConstraint ? "Reroll" : "Roll"}
-                </button>
-              ) : null}
-              {!needsConstraint && canPick ? (
-                <div className="text-xs text-zinc-500 dark:text-zinc-400">No roll required for this draft type.</div>
-              ) : null}
-            </div>
-          </div>
-
-          {needsConstraint ? (
-            <div className="mt-4 flex justify-center">
-              <div className="w-full max-w-3xl rounded-2xl border border-black/10 bg-black/5 px-5 py-4 text-center dark:border-white/10 dark:bg-white/10">
-                {isSpinning ? (
-                  <div className="grid justify-items-center gap-2">
-                    {rollStage === "spinning_team" && spinPreviewTeam?.logo_url ? (
-                      <Image
-                        src={spinPreviewTeam.logo_url}
-                        alt={spinPreviewTeam.name}
-                        width={64}
-                        height={64}
-                        className="h-16 w-16 rounded-xl object-contain"
-                      />
-                    ) : (
-                      <div className="h-16 w-16 rounded-xl border border-black/10 bg-white/60 dark:border-white/10 dark:bg-zinc-900/60" />
-                    )}
-                    <div className="text-xs font-semibold tracking-wide text-zinc-600 dark:text-zinc-300">
-                      {rollStage === "spinning_decade" ? "SPINNING DECADE" : "SPINNING TEAM"}
-                    </div>
-                    <div className="text-lg font-semibold text-zinc-950 dark:text-white">
-                      {rollStage === "spinning_decade"
-                        ? spinPreviewDecade ?? "—"
-                        : spinPreviewTeam?.name ?? "—"}
-                    </div>
-                    <div className="text-sm text-zinc-700 dark:text-zinc-200">
-                      {rollStage === "spinning_team"
-                        ? `(${rollStageDecadeLabel ?? "—"})`
-                        : " "}
-                    </div>
-                  </div>
-                ) : rollConstraint ? (
-                  <div className="grid justify-items-center gap-2">
-                    {rollConstraint.team.logo_url ? (
-                      <Image
-                        src={rollConstraint.team.logo_url}
-                        alt={rollConstraint.team.name}
-                        width={72}
-                        height={72}
-                        className="h-[72px] w-[72px] rounded-2xl object-contain"
-                      />
-                    ) : (
-                      <div className="h-[72px] w-[72px] rounded-2xl border border-black/10 bg-white/60 dark:border-white/10 dark:bg-zinc-900/60" />
-                    )}
-                    <div className="text-xs font-semibold tracking-wide text-zinc-600 dark:text-zinc-300">CONSTRAINT</div>
-                    <div className="text-xl font-bold text-zinc-950 dark:text-white">{rollConstraint.team.name}</div>
-                    <div className="text-base font-semibold text-zinc-700 dark:text-zinc-200">{rollConstraint.decadeLabel}</div>
-                  </div>
-                ) : (
-                  <div className="text-sm text-zinc-600 dark:text-zinc-300">Constraint: click Roll to spin decade + team.</div>
-                )}
-              </div>
-            </div>
-          ) : null}
-        </div>
+        <MainInfoCard
+          currentTurnName={currentTurn ? displayName(currentTurn) : "—"}
+          isLocal={isLocal}
+          infoMessage={infoMessage}
+          needsConstraint={needsConstraint}
+          canRoll={canPick}
+          rollButtonLabel={rollConstraint ? "Reroll" : "Roll"}
+          rollDisabled={isSpinning}
+          onRoll={() => pickSocket.roll()}
+          isSpinning={isSpinning}
+          rollStage={rollStage}
+          spinPreviewDecade={spinPreviewDecade}
+          spinPreviewTeam={spinPreviewTeam}
+          rollStageDecadeLabel={rollStageDecadeLabel}
+          rollConstraint={rollConstraint}
+        />
       ) : null}
 
       {!started ? (
@@ -735,199 +495,79 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
       ) : null}
 
       <div className="grid gap-4 lg:grid-cols-3">
-        <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-900/50">
-          <div className="flex items-baseline justify-between gap-3">
-            <div className="flex items-center gap-2 text-sm font-semibold">
-              <Image
-                src={avatarUrl("host") || "/avatar-placeholder.svg"}
-                alt={displayName("host")}
-                width={28}
-                height={28}
-                className="h-7 w-7 flex-none rounded-full object-cover"
-              />
-              <span className="truncate">{displayName("host")}</span>
-              {isYourTurnForSide("host") ? (
-                <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-[11px] font-semibold text-white">
-                  YOUR TURN
-                </span>
-              ) : null}
-            </div>
-            <div className="text-xs text-zinc-500 dark:text-zinc-400">Host</div>
-          </div>
-          <div className="mt-3 grid gap-2">
-            {hostPicks.length ? (
-              hostPicks.map((p) => (
-                <PickCard key={p.pick_number} p={p} />
-              ))
-            ) : (
-              <div className="text-sm text-zinc-600 dark:text-zinc-300">No picks yet.</div>
-            )}
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-900/50">
-          {!started ? (
-            <div className="text-sm text-zinc-600 dark:text-zinc-300">
-              Waiting for the draft to start. The host will start the draft.
-            </div>
-          ) : (
-            <>
-              <div className="text-sm font-semibold">Pick a player</div>
-              <div className="mt-3 grid gap-3">
-                {selected ? (
-                  <div className="rounded-xl border border-black/10 bg-black/5 p-3 dark:border-white/10 dark:bg-white/10">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="flex min-w-0 items-center gap-3">
-                        <Image
-                          src={selected.image_url ?? "/avatar-placeholder.svg"}
-                          alt={selected.name}
-                          width={40}
-                          height={40}
-                          className="h-10 w-10 flex-none rounded-full object-cover"
-                        />
-                        <div className="min-w-0">
-                          <div className="truncate text-sm font-semibold">{selected.name}</div>
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap justify-end gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setSelected(null)}
-                          className="h-10 whitespace-nowrap rounded-full border border-black/10 bg-white px-3 text-sm font-semibold text-zinc-950 hover:bg-black/5 dark:border-white/10 dark:bg-zinc-900 dark:text-white dark:hover:bg-zinc-800"
-                        >
-                          Clear
-                        </button>
-                        <button
-                          type="button"
-                          disabled={!canConfirmPick}
-                          onClick={() => {
-                            if (!selected) return;
-                            pickSocket.makePick(selected.id, {
-                              constraint_team: rollConstraint?.team.abbreviation ?? rollConstraint?.team.name ?? null,
-                              constraint_year: rollConstraint?.decadeLabel ?? null,
-                            });
-                            setSelected(null);
-                          }}
-                          className="h-10 whitespace-nowrap rounded-full bg-zinc-950 px-4 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-60 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
-                        >
-                          Confirm pick
-                        </button>
-                      </div>
-                    </div>
-                    {!canPick && currentTurn ? (
-                      <div className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">
-                        It’s {currentTurn}’s turn. {isLocal ? "Pick will route automatically." : "Wait for your turn."}
-                      </div>
-                    ) : null}
-                    {!onlyEligible && needsConstraint && rollConstraint && selected ? (
-                      <div className="mt-2 text-xs">
-                        {selectedEligibility === null ? (
-                          <span className="text-zinc-600 dark:text-zinc-300">Checking eligibility…</span>
-                        ) : selectedEligibility ? (
-                          <span className="text-emerald-700 dark:text-emerald-300">
-                            Eligible for {rollConstraint.decadeLabel} • {rollConstraint.team.name}
-                          </span>
-                        ) : (
-                          <span className="text-red-700 dark:text-red-300">
-                            {draftedIds.has(selected.id)
-                              ? "Can’t select this player — already drafted."
-                              : `Can’t select this player — no stint found for ${rollConstraint.team.name} during ${rollConstraint.decadeLabel}.`}
-                          </span>
-                        )}
-                      </div>
-                    ) : null}
-                    {onlyEligible && selected && draftedIds.has(selected.id) ? (
-                      <div className="mt-2 text-xs text-red-700 dark:text-red-300">Can’t select this player — already drafted.</div>
-                    ) : null}
-                  </div>
-                ) : null}
-
-                {needsConstraint && (isLocal || effectiveRole === "host") ? (
-                  <label className="flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-300">
-                    <input
-                      type="checkbox"
-                      checked={onlyEligible}
-                      onChange={(e) => host.setOnlyEligiblePlayers(e.target.checked)}
-                      className="h-4 w-4"
-                    />
-                    Only show eligible players
-                  </label>
-                ) : null}
-
-                <input
-                  className="h-11 rounded-xl border border-black/10 bg-white px-3 text-sm dark:border-white/10 dark:bg-zinc-900/60"
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                  placeholder={canSearch ? "Search player name…" : needsConstraint ? "Spin constraint to search…" : "Search player name…"}
-                  disabled={!canSearch}
-                />
-                {searchError ? <div className="text-sm text-red-700 dark:text-red-300">{searchError}</div> : null}
-
-                <div className="grid gap-2">
-                  {results.map((p) => (
-                    (() => {
-                      const isDrafted = draftedIds.has(p.id);
-                      return (
-                    <button
-                      key={p.id}
-                      type="button"
-                      disabled={!canSearch || isDrafted}
-                      onClick={() => setSelected(p)}
-                      className="flex items-center justify-between rounded-xl border border-black/10 px-3 py-2 text-left text-sm hover:bg-black/5 disabled:opacity-60 dark:border-white/10 dark:hover:bg-white/10"
-                    >
-                      <span className="flex min-w-0 items-center gap-3">
-                        <Image
-                          src={p.image_url ?? "/avatar-placeholder.svg"}
-                          alt={p.name}
-                          width={32}
-                          height={32}
-                          className="h-8 w-8 flex-none rounded-full object-cover"
-                        />
-                        <span className="truncate">{p.name}</span>
-                      </span>
-                      <span className="text-xs text-zinc-500 dark:text-zinc-400">{isDrafted ? "Drafted" : "Select"}</span>
-                    </button>
-                      );
-                    })()
-                  ))}
-                  {results.length === 0 && q.trim() ? (
-                    <div className="text-sm text-zinc-600 dark:text-zinc-300">No results.</div>
-                  ) : null}
-                </div>
-              </div>
-            </>
+        <DraftSideColumn
+          label="Host"
+          name={displayName("host")}
+          avatarUrl={avatarUrl("host")}
+          isYourTurn={isYourTurnForSide("host")}
+          picks={hostPicks as DraftPickWs[]}
+          emptyText="No picks yet."
+          renderPick={(p) => (
+            <PickCard
+              key={p.pick_number}
+              pick={p}
+              isExpanded={expandedPick === p.pick_number}
+              detail={detailsByPlayerId[p.player_id]}
+              loading={Boolean(detailsLoadingByPlayerId[p.player_id])}
+              onToggle={() => setExpandedPick((prev) => (prev === p.pick_number ? null : p.pick_number))}
+              onEnsureDetails={(pid) => void ensurePlayerDetails(pid)}
+              yearsActiveLabel={yearsActiveLabel}
+            />
           )}
-        </div>
+        />
 
-        <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-900/50">
-          <div className="flex items-baseline justify-between gap-3">
-            <div className="flex items-center gap-2 text-sm font-semibold">
-              <Image
-                src={avatarUrl("guest") || "/avatar-placeholder.svg"}
-                alt={displayName("guest")}
-                width={28}
-                height={28}
-                className="h-7 w-7 flex-none rounded-full object-cover"
-              />
-              <span className="truncate">{displayName("guest")}</span>
-              {isYourTurnForSide("guest") ? (
-                <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-[11px] font-semibold text-white">
-                  YOUR TURN
-                </span>
-              ) : null}
-            </div>
-            <div className="text-xs text-zinc-500 dark:text-zinc-400">Guest</div>
-          </div>
-          <div className="mt-3 grid gap-2">
-            {guestPicks.length ? (
-              guestPicks.map((p) => (
-                <PickCard key={p.pick_number} p={p} />
-              ))
-            ) : (
-              <div className="text-sm text-zinc-600 dark:text-zinc-300">No picks yet.</div>
-            )}
-          </div>
-        </div>
+        <PlayerPickerPanel
+          started={started}
+          selected={selected}
+          onClearSelected={() => setSelected(null)}
+          onSelectResult={(p) => setSelected(p)}
+          canConfirmPick={canConfirmPick}
+          onConfirmPick={() => {
+            if (!selected) return;
+            pickSocket.makePick(selected.id, {
+              constraint_team: rollConstraint?.team.abbreviation ?? rollConstraint?.team.name ?? null,
+              constraint_year: rollConstraint?.decadeLabel ?? null,
+            });
+            setSelected(null);
+          }}
+          canPick={canPick}
+          currentTurn={currentTurn}
+          isLocal={isLocal}
+          onlyEligible={onlyEligible}
+          showOnlyEligibleToggle={needsConstraint && (isLocal || effectiveRole === "host")}
+          onOnlyEligibleChange={(v) => host.setOnlyEligiblePlayers(v)}
+          needsConstraint={needsConstraint}
+          rollConstraint={rollConstraint}
+          selectedEligibility={selectedEligibility}
+          drafted={(pid) => draftedIds.has(pid)}
+          q={q}
+          onChangeQ={setQ}
+          placeholder={canSearch ? "Search player name…" : needsConstraint ? "Spin constraint to search…" : "Search player name…"}
+          canSearch={canSearch}
+          searchError={searchError}
+          results={results}
+        />
+
+        <DraftSideColumn
+          label="Guest"
+          name={displayName("guest")}
+          avatarUrl={avatarUrl("guest")}
+          isYourTurn={isYourTurnForSide("guest")}
+          picks={guestPicks as DraftPickWs[]}
+          emptyText="No picks yet."
+          renderPick={(p) => (
+            <PickCard
+              key={p.pick_number}
+              pick={p}
+              isExpanded={expandedPick === p.pick_number}
+              detail={detailsByPlayerId[p.player_id]}
+              loading={Boolean(detailsLoadingByPlayerId[p.player_id])}
+              onToggle={() => setExpandedPick((prev) => (prev === p.pick_number ? null : p.pick_number))}
+              onEnsureDetails={(pid) => void ensurePlayerDetails(pid)}
+              yearsActiveLabel={yearsActiveLabel}
+            />
+          )}
+        />
       </div>
     </div>
   );
