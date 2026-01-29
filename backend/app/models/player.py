@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import ForeignKey, Integer, String, UniqueConstraint
-from sqlalchemy import DateTime, func
+from sqlalchemy import Boolean, DateTime, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -25,7 +25,10 @@ class Player(Base):
     draft_pick: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
 
     team_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id"), nullable=True, index=True)
+    # First season year from BRef A–Z index "From" column.
+    career_start_year: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     retirement_year: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    hall_of_fame: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
     position: Mapped[str | None] = mapped_column(String(30), nullable=True, index=True)
     stints_scraped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     image_url: Mapped[str | None] = mapped_column(String(500), nullable=True)

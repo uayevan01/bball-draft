@@ -87,8 +87,41 @@ async def get_current_user(
     """
     is_dev = settings.app_env.lower() == "dev"
 
-    # If Clerk isn't configured locally, allow dev auth to work even if the frontend sends a token.
+    def _claims_to_identity(payload: dict[str, Any]) -> tuple[str | None, str | None, str | None]:
+        clerk_id = payload.get("sub")
+        email = payload.get("email") or payload.get("primary_email") or None
+        full_name = payload.get("name") or payload.get("full_name") or None
+        if not full_name:
+            given = payload.get("given_name") or payload.get("first_name")
+            family = payload.get("family_name") or payload.get("last_name")
+            if given and family:
+                full_name = f"{given} {family}"
+            elif given:
+                full_name = str(given)
+        username = payload.get("username") or payload.get("preferred_username") or None
+        return clerk_id, email, (username or full_name)
+
+    async def _dev_user_from_token(token: str) -> User:
+        """
+        Dev-only: create/lookup a stable backend user from an unverified Clerk token.
+        This prevents refreshes from "turning into" dev_user and breaking host/guest identity.
+        """
+        try:
+            payload = jwt.decode(token, options={"verify_signature": False, "verify_aud": False, "verify_iss": False})
+        except jwt.PyJWTError:
+            return await _get_or_create_user(db, clerk_id="dev_user", email=None, username="dev_user", full_name="Dev User")
+        clerk_id, email, username = _claims_to_identity(payload)
+        if not clerk_id:
+            return await _get_or_create_user(db, clerk_id="dev_user", email=None, username="dev_user", full_name="Dev User")
+        # In dev, if Clerk doesn't provide username, use a stable-ish fallback derived from email/full_name.
+        full_name = payload.get("name") or payload.get("full_name") or None
+        return await _get_or_create_user(db, clerk_id=clerk_id, email=email, username=username, full_name=full_name)
+
+    # If Clerk JWKS isn't configured locally, still allow per-user identity in dev by decoding the token unverified.
     if is_dev and settings.auth_optional_in_dev and not settings.clerk_jwks_url:
+        if authorization and authorization.lower().startswith("bearer "):
+            token = authorization.split(" ", 1)[1].strip()
+            return await _dev_user_from_token(token)
         return await _get_or_create_user(db, clerk_id="dev_user", email=None, username="dev_user", full_name="Dev User")
 
     if not authorization or not authorization.lower().startswith("bearer "):
@@ -101,13 +134,13 @@ async def get_current_user(
         unverified_header = jwt.get_unverified_header(token)
     except jwt.PyJWTError as e:
         if is_dev and settings.auth_optional_in_dev:
-            return await _get_or_create_user(db, clerk_id="dev_user", email=None, username="dev_user", full_name="Dev User")
+            return await _dev_user_from_token(token)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token header") from e
 
     kid = unverified_header.get("kid")
     if not kid:
         if is_dev and settings.auth_optional_in_dev:
-            return await _get_or_create_user(db, clerk_id="dev_user", email=None, username="dev_user", full_name="Dev User")
+            return await _dev_user_from_token(token)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token missing kid")
 
     try:
@@ -127,7 +160,7 @@ async def get_current_user(
         )
     except (jwt.PyJWTError, HTTPException) as e:
         if is_dev and settings.auth_optional_in_dev:
-            return await _get_or_create_user(db, clerk_id="dev_user", email=None, username="dev_user", full_name="Dev User")
+            return await _dev_user_from_token(token)
         if isinstance(e, HTTPException):
             raise
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from e
@@ -135,7 +168,7 @@ async def get_current_user(
     clerk_id = payload.get("sub")
     if not clerk_id:
         if is_dev and settings.auth_optional_in_dev:
-            return await _get_or_create_user(db, clerk_id="dev_user", email=None, username="dev_user", full_name="Dev User")
+            return await _dev_user_from_token(token)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token missing subject")
 
     email = payload.get("email") or payload.get("primary_email") or None

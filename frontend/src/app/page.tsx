@@ -30,12 +30,6 @@ export default function Home() {
               Go to dashboard
             </Link>
           </SignedIn>
-          <a
-            href="http://localhost:8000/api/health"
-            className="inline-flex h-11 items-center justify-center rounded-full border border-black/10 px-5 text-sm font-semibold hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/10"
-          >
-            Backend health
-          </a>
         </div>
       </main>
     </div>

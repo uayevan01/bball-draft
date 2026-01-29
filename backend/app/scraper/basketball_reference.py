@@ -4,6 +4,7 @@ import re
 import asyncio
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 from bs4 import BeautifulSoup, Comment
@@ -61,6 +62,7 @@ class BRefPlayerIndexRow:
     position: str | None
     year_min: int | None
     year_max: int | None
+    hall_of_fame: bool = False
 
 
 @dataclass(frozen=True)
@@ -207,6 +209,89 @@ async def scrape_teams() -> list[BRefTeamRow]:
     return rows
 
 
+_TEAM_PAGE_ABBR_OVERRIDES: dict[str, str] = {
+    # Our DB uses common NBA shorthand, but Basketball Reference team pages sometimes use different codes.
+    "BKN": "BRK",
+    "CHA": "CHO",
+    "PHX": "PHO",
+}
+
+
+def _normalize_bref_img_src(src: str | None) -> str | None:
+    if not src:
+        return None
+    s = src.strip()
+    if s.startswith("//"):
+        return f"https:{s}"
+    if s.startswith("/"):
+        return f"{_BREF_BASE}{s}"
+    # Prefer https everywhere to avoid mixed-content + Next image config issues.
+    if s.startswith("http://"):
+        s = "https://" + s[len("http://") :]
+    return s
+
+
+def _unwrap_ssref_resizer(url: str | None) -> str | None:
+    """
+    Sports Reference sometimes serves logos via:
+      http(s)://cdn.ssref.net/scripts/image_resize.cgi?...&url=http://cdn.ssref.net/nocdn/tlogo/bbr/MIA.png
+    For our app, store the direct PNG URL instead.
+    """
+    if not url:
+        return None
+    try:
+        u = urlparse(url)
+        if "cdn.ssref.net" not in (u.hostname or ""):
+            return url
+        if not u.path.endswith("/scripts/image_resize.cgi"):
+            return url
+        qs = parse_qs(u.query)
+        inner = (qs.get("url") or [None])[0]
+        return _normalize_bref_img_src(inner) or url
+    except (ValueError, TypeError):
+        return url
+
+
+async def scrape_team_logo(abbreviation: str) -> str | None:
+    """
+    Fetch a team page (/teams/XXX/) and attempt to extract the logo image URL.
+
+    Note: This is an additional request per team, so call it sparingly (e.g., a one-time seed).
+    """
+    abbr = abbreviation.upper().strip()
+    abbr = _TEAM_PAGE_ABBR_OVERRIDES.get(abbr, abbr)
+    async with httpx.AsyncClient(headers={"User-Agent": "nba-draft-app/1.0"}) as client:
+        html = await _get(client, f"{_BREF_BASE}/teams/{abbr}/")
+    soup = BeautifulSoup(html, "lxml")
+
+    # First try meta tags (these are consistent and often point at cdn.ssref.net logos).
+    meta = soup.select_one('meta[property="og:image"]') or soup.select_one('meta[name="twitter:image"]')
+    if meta and meta.get("content"):
+        url = _unwrap_ssref_resizer(_normalize_bref_img_src(meta.get("content")))
+        if url:
+            return url
+
+    # Fall back to scanning for an actual <img>.
+    selectors = [
+        "div#meta div.media-item img",
+        "div#meta img",
+        "div#info div.media-item img",
+        "div#info img",
+        'img[alt*="Logo"]',
+        'img[alt*="logo"]',
+    ]
+    for sel in selectors:
+        img = soup.select_one(sel)
+        if not img:
+            continue
+        src = img.get("src") or img.get("data-src")
+        url = _unwrap_ssref_resizer(_normalize_bref_img_src(src))
+        if url:
+            return url
+
+    return None
+
+
 def _parse_int(s: str | None) -> int | None:
     if not s:
         return None
@@ -254,10 +339,19 @@ async def scrape_player_index(letter: str) -> list[BRefPlayerIndexRow]:
         if tr.get("class") and "thead" in tr.get("class", []):
             continue
 
+        player_th = tr.select_one('th[data-stat="player"]')
         name_cell = tr.select_one('th[data-stat="player"] a')
-        if not name_cell:
+        if not player_th or not name_cell:
             continue
+        # Hall of Fame players have an asterisk after their name, and BRef often renders it OUTSIDE the <a>.
+        # Example: <th data-stat="player"><a>Bill Russell</a>*</th>
+        player_cell_text = _clean(player_th.get_text()) or ""
+        hall_of_fame = "*" in player_cell_text
+
+        # Use the <a> text as the canonical player name (without the asterisk).
         name = _clean(name_cell.get_text())
+        if not name:
+            continue
         bref_id = _parse_bref_player_id_from_href(name_cell.get("href"))
         if not name or not bref_id:
             continue
@@ -270,7 +364,16 @@ async def scrape_player_index(letter: str) -> list[BRefPlayerIndexRow]:
         year_min = _parse_year(_clean(year_min_cell.get_text() if year_min_cell else None))
         year_max = _parse_year(_clean(year_max_cell.get_text() if year_max_cell else None))
 
-        rows.append(BRefPlayerIndexRow(bref_id=bref_id, name=name, position=pos, year_min=year_min, year_max=year_max))
+        rows.append(
+            BRefPlayerIndexRow(
+                bref_id=bref_id,
+                name=name,
+                position=pos,
+                year_min=year_min,
+                year_max=year_max,
+                hall_of_fame=hall_of_fame,
+            )
+        )
 
     return rows
 
@@ -278,15 +381,29 @@ async def scrape_player_index(letter: str) -> list[BRefPlayerIndexRow]:
 async def scrape_all_players_index(concurrency: int = 4) -> list[BRefPlayerIndexRow]:
     sem = asyncio.Semaphore(max(1, concurrency))
 
+    try:
+        from tqdm.auto import tqdm  # type: ignore[import-not-found]
+    except ImportError:  # pragma: no cover
+        tqdm = None  # type: ignore
+
     async def _one(letter: str) -> list[BRefPlayerIndexRow]:
         async with sem:
             return await scrape_player_index(letter)
 
     letters = [chr(c) for c in range(ord("a"), ord("z") + 1)]
-    results = await asyncio.gather(*[_one(l) for l in letters])
+    tasks = [asyncio.create_task(_one(l)) for l in letters]
+
     out: list[BRefPlayerIndexRow] = []
-    for part in results:
-        out.extend(part)
+    bar = tqdm(total=len(tasks), desc="Player index pages", unit="page", dynamic_ncols=True) if tqdm else None
+    try:
+        for fut in asyncio.as_completed(tasks):
+            part = await fut
+            out.extend(part)
+            if bar:
+                bar.update(1)
+    finally:
+        if bar:
+            bar.close()
     return out
 
 
@@ -466,9 +583,16 @@ async def scrape_draft_year(draft_year: int) -> list[BRefDraftRow]:
 
 
 async def scrape_drafts(start_year: int, end_year: int) -> list[BRefDraftRow]:
+    try:
+        from tqdm.auto import tqdm  # type: ignore[import-not-found]
+    except ImportError:  # pragma: no cover
+        tqdm = None  # type: ignore
+
     rows: list[BRefDraftRow] = []
-    for year in range(start_year, end_year + 1):
-        rows.extend(await scrape_draft_year(year))
+    years = list(range(start_year, end_year + 1))
+    it = tqdm(years, desc="Draft years", unit="year", dynamic_ncols=True) if tqdm else years
+    for year in it:
+        rows.extend(await scrape_draft_year(int(year)))
     return rows
 
 

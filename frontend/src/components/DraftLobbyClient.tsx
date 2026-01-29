@@ -73,7 +73,11 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
     let cancelled = false;
     async function run() {
       setJoinError(null);
+      // Only try to claim the guest slot if it's actually empty.
       if (isLocal || effectiveRole !== "guest") return;
+      if (!draft) return;
+      if (draft.guest_id) return;
+      if (myId && draft.host_id === myId) return;
       try {
         const token = await getToken().catch(() => null);
         const updated = await backendPost<Draft>(`/drafts/${encodeURIComponent(draftRef)}/join`, {}, token);
@@ -86,7 +90,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
     return () => {
       cancelled = true;
     };
-  }, [draftRef, effectiveRole, getToken, isLocal]);
+  }, [draft, draftRef, effectiveRole, getToken, isLocal, myId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -137,7 +141,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
       team_id: number;
       start_year: number;
       end_year?: number | null;
-      team?: { id: number; name: string; abbreviation?: string | null } | null;
+      team?: { id: number; name: string; abbreviation?: string | null; logo_url?: string | null } | null;
     }>;
   };
 
@@ -237,8 +241,19 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
                     .map((s) => (
                       <div key={s.id} className="flex items-center justify-between gap-3">
                         <div className="min-w-0 truncate">
-                          <span className="mr-2 inline-flex items-center rounded-full border border-black/10 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-900 dark:border-white/10 dark:bg-zinc-900 dark:text-white">
-                            {s.team?.abbreviation ?? "—"}
+                          <span className="mr-2 inline-flex items-center gap-2 align-middle">
+                            {s.team?.logo_url ? (
+                              <Image
+                                src={s.team.logo_url}
+                                alt={s.team?.abbreviation ?? "Team logo"}
+                                width={18}
+                                height={18}
+                                className="h-[18px] w-[18px] rounded-sm object-contain"
+                              />
+                            ) : null}
+                            <span className="inline-flex items-center rounded-full border border-black/10 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-900 dark:border-white/10 dark:bg-zinc-900 dark:text-white">
+                              {s.team?.abbreviation ?? "—"}
+                            </span>
                           </span>
                           <span className="text-zinc-700 dark:text-zinc-200">{s.team?.name ?? "Unknown team"}</span>
                         </div>

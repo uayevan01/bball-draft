@@ -9,6 +9,14 @@ const nextConfig: NextConfig = {
         protocol: "https",
         hostname: "www.basketball-reference.com",
       },
+      {
+        protocol: "https",
+        hostname: "cdn.ssref.net",
+      },
+      {
+        protocol: "http",
+        hostname: "cdn.ssref.net",
+      },
     ],
   },
 };

@@ -14,7 +14,9 @@ class PlayerOut(ORMBaseModel):
     draft_round: int | None = None
     draft_pick: int | None = None
     team_id: int | None = None
+    career_start_year: int | None = None
     retirement_year: int | None = None
+    hall_of_fame: bool = False
     position: str | None = None
     image_url: str | None = None
 

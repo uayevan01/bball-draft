@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -21,6 +23,10 @@ async def list_players(
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
 ) -> list[Player]:
+    current_year = datetime.now(timezone.utc).year
+    career_len = (
+        func.coalesce(Player.retirement_year, current_year) - func.coalesce(Player.career_start_year, current_year)
+    )
     stmt = select(Player)
     if q:
         stmt = stmt.where(Player.name.ilike(f"%{q}%"))
@@ -28,7 +34,12 @@ async def list_players(
         stmt = stmt.where(Player.draft_year == draft_year)
     if team_id is not None:
         stmt = stmt.where(Player.team_id == team_id)
-    stmt = stmt.order_by(Player.draft_year.desc().nullslast(), Player.draft_pick.asc().nullslast(), Player.name).limit(limit).offset(offset)
+    # Default ordering: Hall of Fame first, then longest career.
+    stmt = (
+        stmt.order_by(desc(Player.hall_of_fame), desc(career_len), Player.name)
+        .limit(limit)
+        .offset(offset)
+    )
     return (await db.execute(stmt)).scalars().all()
 
 

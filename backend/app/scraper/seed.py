@@ -11,9 +11,13 @@ from sqlalchemy.dialects.postgresql import insert
 from app.database import SessionLocal
 from app.config import settings
 from app.models import Player, PlayerTeamStint, Team
-from app.scraper.basketball_reference import scrape_all_players_index, scrape_drafts, scrape_teams
+from app.scraper.basketball_reference import scrape_all_players_index, scrape_drafts, scrape_teams, scrape_team_logo
 from app.scraper.basketball_reference import scrape_player_team_seasons, seasons_to_stints
 
+try:
+    from tqdm.auto import tqdm  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover
+    tqdm = None  # type: ignore
 
 TEAM_METADATA: dict[str, dict[str, str]] = {
     # East
@@ -175,7 +179,7 @@ TEAM_HISTORY: list[dict] = [
 ]
 
 
-async def upsert_teams() -> int:
+async def upsert_teams(*, with_logos: bool = False) -> int:
     team_rows = await scrape_teams()
     # Avoid duplicate abbreviations within the same INSERT statement (Postgres will error even with ON CONFLICT).
     by_abbr: dict[str, dict] = {}
@@ -192,6 +196,7 @@ async def upsert_teams() -> int:
             "dissolved_year": t.dissolved_year,
             "conference": meta.get("conference"),
             "division": meta.get("division"),
+            "logo_url": None,
         }
 
     # Add curated historical identities (separate rows) + ensure current teams have conference/division.
@@ -205,23 +210,37 @@ async def upsert_teams() -> int:
             "dissolved_year": h.get("dissolved_year"),
             "conference": h.get("conference"),
             "division": h.get("division"),
+            "logo_url": None,
         }
+
+    if with_logos:
+        # One extra request per team; keep the global BRef throttle in mind.
+        it = tqdm(by_abbr.items(), total=len(by_abbr), desc="Team logos", unit="team", dynamic_ncols=True) if tqdm else by_abbr.items()
+        for abbr, row in it:
+            try:
+                row["logo_url"] = await scrape_team_logo(abbr)
+            except Exception:
+                row["logo_url"] = None
 
     values = list(by_abbr.values())
     if not values:
         return 0
 
     stmt = insert(Team).values(values)
+    set_fields = {
+        "name": stmt.excluded.name,
+        "city": stmt.excluded.city,
+        "founded_year": stmt.excluded.founded_year,
+        "dissolved_year": stmt.excluded.dissolved_year,
+        "conference": stmt.excluded.conference,
+        "division": stmt.excluded.division,
+    }
+    # Important: only overwrite logo_url when we explicitly scraped logos, otherwise a plain --teams run would wipe them.
+    if with_logos:
+        set_fields["logo_url"] = stmt.excluded.logo_url
     stmt = stmt.on_conflict_do_update(
         constraint="uq_teams_abbreviation",
-        set_={
-            "name": stmt.excluded.name,
-            "city": stmt.excluded.city,
-            "founded_year": stmt.excluded.founded_year,
-            "dissolved_year": stmt.excluded.dissolved_year,
-            "conference": stmt.excluded.conference,
-            "division": stmt.excluded.division,
-        },
+        set_=set_fields,
     )
 
     async with SessionLocal() as session:
@@ -264,7 +283,8 @@ async def upsert_players_from_drafts(start_year: int, end_year: int) -> int:
         abbr_to_team_id = await _team_abbr_map(session)
 
         values = []
-        for r in draft_rows:
+        it = tqdm(draft_rows, total=len(draft_rows), desc="Draft rows", unit="row", dynamic_ncols=True) if tqdm else draft_rows
+        for r in it:
             team_id = None
             if r.team_abbreviation:
                 abbr = ABBR_ALIASES.get(r.team_abbreviation.upper(), r.team_abbreviation.upper())
@@ -312,18 +332,25 @@ async def upsert_all_players_from_index(concurrency: int = 4) -> int:
     if not rows:
         return 0
 
+    current_year = datetime.now(timezone.utc).year
     values = []
-    for r in rows:
-        # Treat year_max as last season year; keep None if still active.
+    it = tqdm(rows, total=len(rows), desc="Players (A–Z)", unit="player", dynamic_ncols=True) if tqdm else rows
+    for r in it:
+        # From/To columns:
+        # - year_min = "From" (you requested to map this into players.draft_year)
+        # - year_max = last season year; if equal to current year, treat as active => retirement_year NULL
         retirement_year = None
-        if r.year_max and r.year_max < 2100:
+        if r.year_max and r.year_max < current_year:
             retirement_year = r.year_max
         values.append(
             {
                 "bref_id": r.bref_id,
                 "name": r.name,
                 "position": r.position,
+                "draft_year": r.year_min,
+                "career_start_year": r.year_min,
                 "retirement_year": retirement_year,
+                "hall_of_fame": bool(getattr(r, "hall_of_fame", False)),
             }
         )
 
@@ -336,7 +363,10 @@ async def upsert_all_players_from_index(concurrency: int = 4) -> int:
                 set_={
                     "name": stmt.excluded.name,
                     "position": stmt.excluded.position,
+                    "draft_year": stmt.excluded.draft_year,
+                    "career_start_year": stmt.excluded.career_start_year,
                     "retirement_year": stmt.excluded.retirement_year,
+                    "hall_of_fame": stmt.excluded.hall_of_fame,
                 },
             )
             await session.execute(stmt)
@@ -356,12 +386,6 @@ async def upsert_player_team_stints(
     """
     Populate PlayerTeamStint rows by scraping each player's BRef page and computing contiguous team ranges.
     """
-    # Optional progress bar (falls back to simple prints if tqdm isn't installed)
-    try:
-        from tqdm.auto import tqdm  # type: ignore[import-not-found]
-    except ImportError:  # pragma: no cover
-        tqdm = None  # type: ignore
-
     print(f"[player-stints] using DATABASE_URL={settings.database_url}")
 
     async with SessionLocal() as session:
@@ -509,6 +533,7 @@ async def upsert_player_team_stints(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Seed Teams/Players from Basketball Reference.")
     parser.add_argument("--teams", action="store_true", help="Scrape and upsert Teams")
+    parser.add_argument("--team-logos", action="store_true", help="Also scrape and store team logo_url (slower)")
     parser.add_argument("--drafts", nargs=2, type=int, metavar=("START_YEAR", "END_YEAR"), help="Scrape drafts and upsert Players")
     parser.add_argument("--all-players", action="store_true", help="Scrape ALL players A–Z (drafted + undrafted) and upsert by bref_id")
     parser.add_argument("--player-stints", action="store_true", help="Scrape player pages and populate player_team_stints")
@@ -521,7 +546,7 @@ def main() -> None:
 
     async def _run() -> None:
         if args.teams:
-            n = await upsert_teams()
+            n = await upsert_teams(with_logos=bool(args.team_logos))
             print(f"Upserted teams: {n}")
         if args.drafts:
             start_year, end_year = args.drafts

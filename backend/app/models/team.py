@@ -24,6 +24,8 @@ class Team(Base):
     conference: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
     division: Mapped[str | None] = mapped_column(String(30), nullable=True, index=True)
 
+    logo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
     previous_team: Mapped["Team | None"] = relationship(
         "Team",
         remote_side="Team.id",

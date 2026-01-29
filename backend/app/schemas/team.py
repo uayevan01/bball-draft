@@ -13,5 +13,6 @@ class TeamOut(ORMBaseModel):
     dissolved_year: int | None = None
     conference: str | None = None
     division: str | None = None
+    logo_url: str | None = None
 
 
