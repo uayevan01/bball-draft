@@ -152,6 +152,9 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
             await ws.send_json({"type": "error", "message": "Draft not found"})
             await ws.close()
             return
+        # Load draft type rules for lobby settings defaults.
+        draft_type = await db.get(DraftType, draft.draft_type_id) if draft.draft_type_id else None
+        rules = draft_type.rules if draft_type and isinstance(draft_type.rules, dict) else {}
 
         picks_stmt = (
             select(DraftPick)
@@ -181,6 +184,11 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
             if inferred in ("host", "guest"):
                 first_turn = inferred
         await draft_manager.rehydrate_from_db(session, first_turn=first_turn, pick_rows=pick_rows, started=started)
+        # Initialize host-controlled lobby setting (default: True) from rules.suggest if present.
+        suggest = rules.get("suggest")
+        async with session.lock:
+            if session.only_eligible is None:
+                session.only_eligible = bool(True if suggest is None else suggest)
 
     await draft_manager.broadcast(
         session,
@@ -194,6 +202,7 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
             "current_turn": session.current_turn,
             "picks": session.picks,
             "constraint": session.current_constraint,
+            "only_eligible": session.only_eligible,
         },
     )
 
@@ -278,6 +287,20 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
                         "decadeEnd": end_year,
                         "team": team_payload,
                     }
+            elif msg_type == "set_only_eligible":
+                if role != "host":
+                    await draft_manager.send_to(session, role, {"type": "error", "message": "Only host can change this setting"})
+                    continue
+                value = data.get("value")
+                if not isinstance(value, bool):
+                    await draft_manager.send_to(session, role, {"type": "error", "message": "value must be boolean"})
+                    continue
+                async with session.lock:
+                    session.only_eligible = value
+                await draft_manager.broadcast(
+                    session,
+                    {"type": "only_eligible_updated", "draft_id": draft_id, "value": value},
+                )
             elif msg_type == "make_pick":
                 player_id = data.get("player_id")
                 if not isinstance(player_id, int):
@@ -360,7 +383,7 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
                 )
 
     except WebSocketDisconnect:
-        await draft_manager.disconnect(session, role)
+        await draft_manager.disconnect(session, role, ws)
         logger.info("ws disconnect draft_id=%s role=%s", draft_id, role)
         await draft_manager.broadcast(
             session,

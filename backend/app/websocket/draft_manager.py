@@ -14,7 +14,7 @@ Role = Literal["host", "guest"]
 @dataclass
 class DraftSession:
     draft_id: int
-    conns: dict[Role, WebSocket] = field(default_factory=dict)
+    conns: dict[Role, list[WebSocket]] = field(default_factory=dict)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     # draft state (minimal for now; persisted picks come later)
@@ -26,6 +26,8 @@ class DraftSession:
     picks: list[dict] = field(default_factory=list)
     # current rolled constraint (not yet persisted; used so both clients see the roll even if one reconnects)
     current_constraint: dict | None = None
+    # lobby setting: whether search should only show eligible players (host-controlled)
+    only_eligible: bool | None = None
 
     def other(self, role: Role) -> Role:
         return "guest" if role == "host" else "host"
@@ -45,7 +47,8 @@ class DraftManager:
     async def connect(self, draft_id: int, role: Role, ws: WebSocket) -> DraftSession:
         session = await self.get_or_create(draft_id)
         async with session.lock:
-            session.conns[role] = ws
+            session.conns.setdefault(role, [])
+            session.conns[role].append(ws)
         return session
 
     async def rehydrate_from_db(
@@ -70,37 +73,60 @@ class DraftManager:
             else:
                 session.current_turn = None
 
-    async def disconnect(self, session: DraftSession, role: Role) -> None:
+    async def disconnect(self, session: DraftSession, role: Role, ws: WebSocket | None = None) -> None:
         async with session.lock:
             if role in session.conns:
-                del session.conns[role]
+                if ws is None:
+                    # Drop all sockets for this role (fallback).
+                    session.conns.pop(role, None)
+                else:
+                    session.conns[role] = [w for w in session.conns[role] if w is not ws]
+                    if not session.conns[role]:
+                        session.conns.pop(role, None)
             if not session.conns:
                 async with self._global_lock:
                     self._sessions.pop(session.draft_id, None)
 
     async def broadcast(self, session: DraftSession, message: dict) -> None:
         async with session.lock:
-            conns = list(session.conns.items())  # [(role, ws), ...]
+            conns: list[tuple[Role, WebSocket]] = []
+            for role, wss in session.conns.items():
+                for ws in wss:
+                    conns.append((role, ws))
         dead_roles: list[Role] = []
+        dead_by_role: dict[Role, list[WebSocket]] = {}
         for role, ws in conns:
             try:
                 await ws.send_json(message)
             except Exception:
                 dead_roles.append(role)
+                dead_by_role.setdefault(role, []).append(ws)
         if dead_roles:
             async with session.lock:
-                for r in dead_roles:
-                    session.conns.pop(r, None)
+                for r, wss in dead_by_role.items():
+                    if r not in session.conns:
+                        continue
+                    session.conns[r] = [w for w in session.conns[r] if w not in wss]
+                    if not session.conns[r]:
+                        session.conns.pop(r, None)
 
     async def send_to(self, session: DraftSession, role: Role, message: dict) -> None:
         async with session.lock:
-            ws = session.conns.get(role)
-        if ws:
+            wss = list(session.conns.get(role, []))
+        if not wss:
+            return
+        dead: list[WebSocket] = []
+        for ws in wss:
             try:
                 await ws.send_json(message)
             except Exception:
-                async with session.lock:
-                    session.conns.pop(role, None)
+                dead.append(ws)
+        if dead:
+            async with session.lock:
+                if role in session.conns:
+                    session.conns[role] = [w for w in session.conns[role] if w not in dead]
+                    if not session.conns[role]:
+                        session.conns.pop(role, None)
 
     async def start(self, session: DraftSession) -> Role:
         async with session.lock:

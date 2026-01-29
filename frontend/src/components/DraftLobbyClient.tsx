@@ -80,28 +80,42 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
 
   const effectiveRole = isLocal ? role : desiredRole;
 
-  const host = useDraftSocket(draftRef, "host", isLocal || effectiveRole === "host");
-  const guest = useDraftSocket(draftRef, "guest", isLocal || effectiveRole === "guest");
+  // Don't open a "host" socket while we still don't know who the current user is.
+  // Otherwise a guest refresh can briefly connect as host and confuse the server + UI state.
+  const multiplayerReady = Boolean(draft && myId);
+  const host = useDraftSocket(draftRef, "host", isLocal || (multiplayerReady && effectiveRole === "host"));
+  const guest = useDraftSocket(draftRef, "guest", isLocal || (multiplayerReady && effectiveRole === "guest"));
 
-  const connectedRoles = Array.from(new Set([...(host.connectedRoles ?? []), ...(guest.connectedRoles ?? [])]));
-  const firstTurn = host.firstTurn ?? guest.firstTurn;
-  const currentTurn = host.currentTurn ?? guest.currentTurn;
-  const picks = host.picks.length ? host.picks : guest.picks;
-  const lastError = host.lastError ?? guest.lastError;
+  // IMPORTANT: in multiplayer, only ONE socket should drive UI state (the active role).
+  // If we merge state from both hooks, we can accidentally "win" with stale state from a disabled socket.
+  const multiplayerSocket = effectiveRole === "host" ? host : guest;
+  const stateSocket = isLocal
+    ? host.firstTurn || host.currentTurn || host.picks.length
+      ? host
+      : guest
+    : multiplayerSocket;
+
+  const connectedRoles = isLocal
+    ? Array.from(new Set([...(host.connectedRoles ?? []), ...(guest.connectedRoles ?? [])]))
+    : stateSocket.connectedRoles ?? [];
+  const firstTurn = stateSocket.firstTurn;
+  const currentTurn = stateSocket.currentTurn;
+  const picks = stateSocket.picks;
+  const lastError = stateSocket.lastError;
 
   const started = Boolean(firstTurn);
 
   const canPick = isLocal || effectiveRole === currentTurn;
   const pickSocket = isLocal ? (currentTurn === "guest" ? guest : host) : effectiveRole === "guest" ? guest : host;
 
-  const rollStage = host.rollStage ?? guest.rollStage;
-  const rollText = host.rollText ?? guest.rollText;
-  const rollConstraint = host.rollConstraint ?? guest.rollConstraint;
+  const rollStage = stateSocket.rollStage;
+  const rollText = stateSocket.rollText;
+  const rollConstraint = stateSocket.rollConstraint;
+  const onlyEligible = stateSocket.onlyEligible;
 
   const isSpinning = rollStage === "spinning_decade" || rollStage === "spinning_team";
   const needsConstraint = Boolean(rules?.spin_fields?.includes("year") || rules?.spin_fields?.includes("team"));
   const canSearch = Boolean(started && canPick && !isSpinning && (!needsConstraint || rollConstraint));
-  const canConfirmPick = Boolean(started && selected && canPick && !isSpinning && (!needsConstraint || rollConstraint));
 
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
 
@@ -141,7 +155,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
         const params = new URLSearchParams();
         params.set("q", term);
         params.set("limit", "10");
-        if (rollConstraint) {
+        if (rollConstraint && onlyEligible) {
           params.set("stint_team_id", String(rollConstraint.team.id));
           params.set("stint_start_year", String(rollConstraint.decadeStart));
           params.set("stint_end_year", String(rollConstraint.decadeEnd));
@@ -157,7 +171,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
       cancelled = true;
       clearTimeout(t);
     };
-  }, [q, canSearch, rollConstraint]);
+  }, [q, canSearch, rollConstraint, onlyEligible]);
 
   // Roll is handled by websocket so both players see the same spinner + result.
 
@@ -169,7 +183,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
     const picker = displayName(last.role);
     const msg = `${picker} has selected ${last.player_name}`;
     setInfoMessage(msg);
-    const t = window.setTimeout(() => setInfoMessage(null), 3000);
+    const t = window.setTimeout(() => setInfoMessage(null), 4000);
     return () => window.clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [picks.length]);
@@ -230,6 +244,37 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
     // ensurePlayerDetails is stable enough here; we intentionally avoid adding it to deps to prevent ref churn
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pickedPlayerIds]);
+
+  // When "only eligible" is OFF, we need details for the selected player to validate eligibility.
+  useEffect(() => {
+    if (!selected) return;
+    if (!needsConstraint || !rollConstraint) return;
+    if (onlyEligible) return;
+    void ensurePlayerDetails(selected.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.id, needsConstraint, rollConstraint?.team?.id, rollConstraint?.decadeLabel, onlyEligible]);
+
+  const selectedEligibility = useMemo<null | boolean>(() => {
+    if (!selected) return null;
+    if (!needsConstraint || !rollConstraint) return true;
+    if (onlyEligible) return true;
+    const detail = detailsByPlayerId[selected.id];
+    if (!detail) return null;
+    const stints = detail.team_stints ?? [];
+    const teamId = rollConstraint.team.id;
+    const start = rollConstraint.decadeStart;
+    const end = rollConstraint.decadeEnd;
+    return stints.some((s) => s.team_id === teamId && s.start_year <= end && (s.end_year ?? 9999) >= start);
+  }, [selected, needsConstraint, rollConstraint, onlyEligible, detailsByPlayerId]);
+
+  const canConfirmPick = Boolean(
+    started &&
+      selected &&
+      canPick &&
+      !isSpinning &&
+      (!needsConstraint || rollConstraint) &&
+      (onlyEligible || selectedEligibility === true),
+  );
 
   function yearsActiveLabel(detail?: PlayerDetail): string {
     const stints = detail?.team_stints ?? [];
@@ -546,7 +591,34 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
                         It’s {currentTurn}’s turn. {isLocal ? "Pick will route automatically." : "Wait for your turn."}
                       </div>
                     ) : null}
+                    {!onlyEligible && needsConstraint && rollConstraint && selected ? (
+                      <div className="mt-2 text-xs">
+                        {selectedEligibility === null ? (
+                          <span className="text-zinc-600 dark:text-zinc-300">Checking eligibility…</span>
+                        ) : selectedEligibility ? (
+                          <span className="text-emerald-700 dark:text-emerald-300">
+                            Eligible for {rollConstraint.decadeLabel} • {rollConstraint.team.name}
+                          </span>
+                        ) : (
+                          <span className="text-red-700 dark:text-red-300">
+                            Can’t select this player — no stint found for {rollConstraint.team.name} during {rollConstraint.decadeLabel}.
+                          </span>
+                        )}
+                      </div>
+                    ) : null}
                   </div>
+                ) : null}
+
+                {needsConstraint && (isLocal || effectiveRole === "host") ? (
+                  <label className="flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-300">
+                    <input
+                      type="checkbox"
+                      checked={onlyEligible}
+                      onChange={(e) => host.setOnlyEligiblePlayers(e.target.checked)}
+                      className="h-4 w-4"
+                    />
+                    Only show eligible players
+                  </label>
                 ) : null}
 
                 <input
