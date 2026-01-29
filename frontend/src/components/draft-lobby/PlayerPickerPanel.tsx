@@ -1,17 +1,17 @@
 "use client";
 
+import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
+import { useAuth } from "@clerk/nextjs";
 
-import type { PlayerSearchResult, RollConstraint } from "./types";
+import { backendGet } from "@/lib/backendClient";
+
+import type { PlayerDetail, PlayerSearchResult, RollConstraint } from "./types";
 
 export function PlayerPickerPanel({
   started,
-  selected,
-  onClearSelected,
-  onSelectResult,
-  canConfirmPick,
-  onConfirmPick,
   canPick,
+  isSpinning,
   currentTurn,
   isLocal,
   onlyEligible,
@@ -19,22 +19,14 @@ export function PlayerPickerPanel({
   onOnlyEligibleChange,
   needsConstraint,
   rollConstraint,
-  selectedEligibility,
   drafted,
-  q,
-  onChangeQ,
-  placeholder,
   canSearch,
   searchError,
-  results,
+  onPickPlayer,
 }: {
   started: boolean;
-  selected: PlayerSearchResult | null;
-  onClearSelected: () => void;
-  onSelectResult: (p: PlayerSearchResult) => void;
-  canConfirmPick: boolean;
-  onConfirmPick: () => void;
   canPick: boolean;
+  isSpinning: boolean;
   currentTurn: "host" | "guest" | null;
   isLocal: boolean;
   onlyEligible: boolean;
@@ -42,15 +34,120 @@ export function PlayerPickerPanel({
   onOnlyEligibleChange: (v: boolean) => void;
   needsConstraint: boolean;
   rollConstraint: RollConstraint | null;
-  selectedEligibility: boolean | null;
   drafted: (playerId: number) => boolean;
-  q: string;
-  onChangeQ: (v: string) => void;
-  placeholder: string;
   canSearch: boolean;
   searchError: string | null;
-  results: PlayerSearchResult[];
+  onPickPlayer: (playerId: number) => void;
 }) {
+  const { getToken } = useAuth();
+  const [q, setQ] = useState("");
+  const [results, setResults] = useState<PlayerSearchResult[]>([]);
+  const [searchErrorLocal, setSearchErrorLocal] = useState<string | null>(null);
+  const [selected, setSelected] = useState<PlayerSearchResult | null>(null);
+  const [selectedEligibility, setSelectedEligibility] = useState<boolean | null>(null);
+  const detailsCacheRef = useRef<Record<number, PlayerDetail | undefined>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    async function run() {
+      setSearchErrorLocal(null);
+      const term = q.trim();
+      if (!term || !canSearch) {
+        setResults([]);
+        return;
+      }
+      try {
+        const params = new URLSearchParams();
+        params.set("q", term);
+        params.set("limit", "10");
+        if (rollConstraint && onlyEligible) {
+          params.set("stint_team_id", String(rollConstraint.team.id));
+          params.set("stint_start_year", String(rollConstraint.decadeStart));
+          params.set("stint_end_year", String(rollConstraint.decadeEnd));
+        }
+        const token = await getToken().catch(() => null);
+        const data = await backendGet<PlayerSearchResult[]>(`/players?${params.toString()}`, token);
+        if (!cancelled) setResults(data);
+      } catch (e) {
+        if (!cancelled) setSearchErrorLocal(e instanceof Error ? e.message : "Search failed");
+      }
+    }
+    const t = window.setTimeout(run, 250);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+  }, [q, canSearch, rollConstraint, onlyEligible, getToken]);
+
+  const placeholder = canSearch ? "Search player name…" : needsConstraint ? "Spin constraint to search…" : "Search player name…";
+  const errorToShow = searchErrorLocal || searchError;
+
+  // Eligibility check for "only eligible" OFF (we allow searching all players but gate confirm).
+  useEffect(() => {
+    let cancelled = false;
+    async function run() {
+      setSelectedEligibility(null);
+      if (!selected) return;
+      if (drafted(selected.id)) {
+        setSelectedEligibility(false);
+        return;
+      }
+      if (!needsConstraint || !rollConstraint) {
+        setSelectedEligibility(true);
+        return;
+      }
+      if (onlyEligible) {
+        setSelectedEligibility(true);
+        return;
+      }
+
+      const cached = detailsCacheRef.current[selected.id];
+      if (cached) {
+        const ok = (cached.team_stints ?? []).some(
+          (s) =>
+            s.team_id === rollConstraint.team.id &&
+            s.start_year <= rollConstraint.decadeEnd &&
+            (s.end_year ?? 9999) >= rollConstraint.decadeStart,
+        );
+        setSelectedEligibility(ok);
+        return;
+      }
+
+      try {
+        const token = await getToken().catch(() => null);
+        const detail = await backendGet<PlayerDetail>(`/players/${selected.id}/details`, token);
+        detailsCacheRef.current[selected.id] = detail;
+        if (cancelled) return;
+        const ok = (detail.team_stints ?? []).some(
+          (s) =>
+            s.team_id === rollConstraint.team.id &&
+            s.start_year <= rollConstraint.decadeEnd &&
+            (s.end_year ?? 9999) >= rollConstraint.decadeStart,
+        );
+        setSelectedEligibility(ok);
+      } catch {
+        if (!cancelled) setSelectedEligibility(false);
+      }
+    }
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [selected, drafted, needsConstraint, rollConstraint, onlyEligible, getToken]);
+
+  const canConfirmPick = useMemo(() => {
+    if (!started) return false;
+    if (!selected) return false;
+    if (!canPick) return false;
+    if (isSpinning) return false;
+    if (drafted(selected.id)) return false;
+    if (needsConstraint && !rollConstraint) return false;
+    if (!onlyEligible && needsConstraint && rollConstraint) {
+      return selectedEligibility === true;
+    }
+    return true;
+  }, [started, selected, canPick, isSpinning, drafted, needsConstraint, rollConstraint, onlyEligible, selectedEligibility]);
+
   return (
     <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-900/50">
       {!started ? (
@@ -77,7 +174,7 @@ export function PlayerPickerPanel({
                   <div className="flex flex-wrap justify-end gap-2">
                     <button
                       type="button"
-                      onClick={onClearSelected}
+                      onClick={() => setSelected(null)}
                       className="h-10 whitespace-nowrap rounded-full border border-black/10 bg-white px-3 text-sm font-semibold text-zinc-950 hover:bg-black/5 dark:border-white/10 dark:bg-zinc-900 dark:text-white dark:hover:bg-zinc-800"
                     >
                       Clear
@@ -85,7 +182,11 @@ export function PlayerPickerPanel({
                     <button
                       type="button"
                       disabled={!canConfirmPick}
-                      onClick={onConfirmPick}
+                      onClick={() => {
+                        if (!selected) return;
+                        onPickPlayer(selected.id);
+                        setSelected(null);
+                      }}
                       className="h-10 whitespace-nowrap rounded-full bg-zinc-950 px-4 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-60 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
                     >
                       Confirm pick
@@ -138,11 +239,11 @@ export function PlayerPickerPanel({
             <input
               className="h-11 rounded-xl border border-black/10 bg-white px-3 text-sm dark:border-white/10 dark:bg-zinc-900/60"
               value={q}
-              onChange={(e) => onChangeQ(e.target.value)}
+              onChange={(e) => setQ(e.target.value)}
               placeholder={placeholder}
               disabled={!canSearch}
             />
-            {searchError ? <div className="text-sm text-red-700 dark:text-red-300">{searchError}</div> : null}
+            {errorToShow ? <div className="text-sm text-red-700 dark:text-red-300">{errorToShow}</div> : null}
 
             <div className="grid gap-2">
               {results.map((p) => {
@@ -152,7 +253,7 @@ export function PlayerPickerPanel({
                     key={p.id}
                     type="button"
                     disabled={!canSearch || isDrafted}
-                    onClick={() => onSelectResult(p)}
+                    onClick={() => setSelected(p)}
                     className="flex items-center justify-between rounded-xl border border-black/10 px-3 py-2 text-left text-sm hover:bg-black/5 disabled:opacity-60 dark:border-white/10 dark:hover:bg-white/10"
                   >
                     <span className="flex min-w-0 items-center gap-3">

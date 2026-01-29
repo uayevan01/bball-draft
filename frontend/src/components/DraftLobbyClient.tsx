@@ -13,7 +13,7 @@ import { DraftSideColumn } from "@/components/draft-lobby/DraftSideColumn";
 import { MainInfoCard } from "@/components/draft-lobby/MainInfoCard";
 import { PickCard } from "@/components/draft-lobby/PickCard";
 import { PlayerPickerPanel } from "@/components/draft-lobby/PlayerPickerPanel";
-import type { DraftPickWs, PlayerDetail, PlayerSearchResult, RollConstraint, SpinPreviewTeam } from "@/components/draft-lobby/types";
+import type { DraftPickWs, PlayerDetail, RollConstraint, SpinPreviewTeam } from "@/components/draft-lobby/types";
 
 export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
   const searchParams = useSearchParams();
@@ -23,11 +23,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [myId, setMyId] = useState<string | null>(null);
   const [role] = useState<"host" | "guest">("host");
-  const [q, setQ] = useState("");
-  const [results, setResults] = useState<PlayerSearchResult[]>([]);
-  const [searchError, setSearchError] = useState<string | null>(null);
   const [joinError, setJoinError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<PlayerSearchResult | null>(null);
   const [copied, setCopied] = useState(false);
   const [inviteUrl, setInviteUrl] = useState<string>("");
   const [rules, setRules] = useState<DraftRules | null>(null);
@@ -152,37 +148,6 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
       cancelled = true;
     };
   }, [draft, draftRef, effectiveRole, getToken, isLocal, myId]);
-
-  useEffect(() => {
-    let cancelled = false;
-    async function run() {
-      setSearchError(null);
-      const term = q.trim();
-      if (!term || !canSearch) {
-        setResults([]);
-        return;
-      }
-      try {
-        const params = new URLSearchParams();
-        params.set("q", term);
-        params.set("limit", "10");
-        if (rollConstraint && onlyEligible) {
-          params.set("stint_team_id", String(rollConstraint.team.id));
-          params.set("stint_start_year", String(rollConstraint.decadeStart));
-          params.set("stint_end_year", String(rollConstraint.decadeEnd));
-        }
-        const data = await backendGet<PlayerSearchResult[]>(`/players?${params.toString()}`);
-        if (!cancelled) setResults(data);
-      } catch (e) {
-        if (!cancelled) setSearchError(e instanceof Error ? e.message : "Search failed");
-      }
-    }
-    const t = setTimeout(run, 250);
-    return () => {
-      cancelled = true;
-      clearTimeout(t);
-    };
-  }, [q, canSearch, rollConstraint, onlyEligible]);
 
   // Roll is handled by websocket so both players see the same spinner + result.
   useEffect(() => {
@@ -364,39 +329,6 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pickedPlayerIds]);
 
-  // When "only eligible" is OFF, we need details for the selected player to validate eligibility.
-  useEffect(() => {
-    if (!selected) return;
-    if (!needsConstraint || !rollConstraint) return;
-    if (onlyEligible) return;
-    void ensurePlayerDetails(selected.id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected?.id, needsConstraint, rollConstraint?.team?.id, rollConstraint?.decadeLabel, onlyEligible]);
-
-  const selectedEligibility = useMemo<null | boolean>(() => {
-    if (!selected) return null;
-    if (draftedIds.has(selected.id)) return false;
-    if (!needsConstraint || !rollConstraint) return true;
-    if (onlyEligible) return true;
-    const detail = detailsByPlayerId[selected.id];
-    if (!detail) return null;
-    const stints = detail.team_stints ?? [];
-    const teamId = rollConstraint.team.id;
-    const start = rollConstraint.decadeStart;
-    const end = rollConstraint.decadeEnd;
-    return stints.some((s) => s.team_id === teamId && s.start_year <= end && (s.end_year ?? 9999) >= start);
-  }, [selected, needsConstraint, rollConstraint, onlyEligible, detailsByPlayerId, draftedIds]);
-
-  const canConfirmPick = Boolean(
-    started &&
-      selected &&
-      !draftedIds.has(selected.id) &&
-      canPick &&
-      !isSpinning &&
-      (!needsConstraint || rollConstraint) &&
-      (onlyEligible || selectedEligibility === true),
-  );
-
   function yearsActiveLabel(detail?: PlayerDetail): string {
     const stints = detail?.team_stints ?? [];
     const years = stints.sort((a, b) => a.start_year - b.start_year);
@@ -518,19 +450,8 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
 
         <PlayerPickerPanel
           started={started}
-          selected={selected}
-          onClearSelected={() => setSelected(null)}
-          onSelectResult={(p) => setSelected(p)}
-          canConfirmPick={canConfirmPick}
-          onConfirmPick={() => {
-            if (!selected) return;
-            pickSocket.makePick(selected.id, {
-              constraint_team: rollConstraint?.team.abbreviation ?? rollConstraint?.team.name ?? null,
-              constraint_year: rollConstraint?.decadeLabel ?? null,
-            });
-            setSelected(null);
-          }}
           canPick={canPick}
+          isSpinning={isSpinning}
           currentTurn={currentTurn}
           isLocal={isLocal}
           onlyEligible={onlyEligible}
@@ -538,14 +459,15 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
           onOnlyEligibleChange={(v) => host.setOnlyEligiblePlayers(v)}
           needsConstraint={needsConstraint}
           rollConstraint={rollConstraint}
-          selectedEligibility={selectedEligibility}
           drafted={(pid) => draftedIds.has(pid)}
-          q={q}
-          onChangeQ={setQ}
-          placeholder={canSearch ? "Search player name…" : needsConstraint ? "Spin constraint to search…" : "Search player name…"}
           canSearch={canSearch}
-          searchError={searchError}
-          results={results}
+          searchError={null}
+          onPickPlayer={(playerId) => {
+            pickSocket.makePick(playerId, {
+              constraint_team: rollConstraint?.team.abbreviation ?? rollConstraint?.team.name ?? null,
+              constraint_year: rollConstraint?.decadeLabel ?? null,
+            });
+          }}
         />
 
         <DraftSideColumn
