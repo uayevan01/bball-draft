@@ -5,6 +5,7 @@ import Image from "next/image";
 import type { DraftPickWs, PlayerDetail } from "./types";
 
 export function PickCard({
+  slotNumber,
   pick,
   isExpanded,
   detail,
@@ -13,6 +14,7 @@ export function PickCard({
   onEnsureDetails,
   yearsActiveLabel,
 }: {
+  slotNumber: number;
   pick: DraftPickWs;
   isExpanded: boolean;
   detail: PlayerDetail | undefined;
@@ -35,19 +37,22 @@ export function PickCard({
           <Image
             src={pick.player_image_url ?? "/avatar-placeholder.svg"}
             alt={pick.player_name}
-            width={36}
-            height={36}
-            className="h-14 w-12 flex-none rounded-full object-cover"
+            width={56}
+            height={56}
+            className="h-14 w-14 flex-none rounded-lg object-contain"
           />
           <div className="min-w-0">
             <div className="truncate font-semibold">
-              <span className="mr-2 text-xs font-normal text-zinc-500 dark:text-zinc-400">#{pick.pick_number}</span>
+              <span className="mr-2 text-xs font-normal text-zinc-500 dark:text-zinc-400">#{slotNumber}</span>
               {pick.player_name}
               {detail?.position ? (
                 <span className="ml-2 text-xs font-normal text-zinc-500 dark:text-zinc-400">{detail.position}</span>
               ) : null}
             </div>
             <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-600 dark:text-zinc-300">
+              <span>
+                (picked #{pick.pick_number} overall)
+              </span>
               <span>Years active: {yearsActiveLabel(detail)}</span>
               <span>
                 Constraints:{" "}

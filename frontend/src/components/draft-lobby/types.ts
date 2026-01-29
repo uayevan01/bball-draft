@@ -13,6 +13,9 @@ export type TeamLite = {
   name: string;
   abbreviation?: string | null;
   logo_url?: string | null;
+  previous_team_id?: number | null;
+  founded_year?: number | null;
+  dissolved_year?: number | null;
 };
 
 export type RollConstraint = {
@@ -20,6 +23,21 @@ export type RollConstraint = {
   decadeStart: number;
   decadeEnd: number;
   team: TeamLite;
+};
+
+export type ConstraintTeamSegment = {
+  team: TeamLite;
+  // Optional display range for coalesced franchises (e.g. Sonics 00-08, Thunder 08-09).
+  startYear?: number | null;
+  endYear?: number | null;
+};
+
+// Used for both "rolled" constraints (year+team) and static constraints (e.g. fixed teams, any year).
+export type EligibilityConstraint = {
+  teams: ConstraintTeamSegment[];
+  yearLabel?: string | null;
+  yearStart?: number | null;
+  yearEnd?: number | null;
 };
 
 export type SpinPreviewTeam = {

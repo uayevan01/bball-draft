@@ -20,6 +20,10 @@ async def list_players(
     draft_year: int | None = Query(default=None),
     team_id: int | None = Query(default=None),
     stint_team_id: int | None = Query(default=None, description="Filter by PlayerTeamStint.team_id"),
+    stint_team_ids: str | None = Query(
+        default=None,
+        description="Filter by PlayerTeamStint.team_id (comma-separated list). Example: 14,2,7",
+    ),
     stint_start_year: int | None = Query(default=None, description="Filter by stint overlap start year (inclusive)"),
     stint_end_year: int | None = Query(default=None, description="Filter by stint overlap end year (inclusive)"),
     limit: int = Query(default=50, ge=1, le=200),
@@ -37,12 +41,31 @@ async def list_players(
         stmt = stmt.where(Player.draft_year == draft_year)
     if team_id is not None:
         stmt = stmt.where(Player.team_id == team_id)
+    stint_team_id_list: list[int] = []
     if stint_team_id is not None:
+        stint_team_id_list.append(stint_team_id)
+    if stint_team_ids:
+        try:
+            for part in stint_team_ids.split(","):
+                part = part.strip()
+                if not part:
+                    continue
+                stint_team_id_list.append(int(part))
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="stint_team_ids must be a comma-separated list of integers",
+            ) from exc
+    stint_team_id_list = sorted(set(stint_team_id_list))
+
+    if stint_team_id_list:
         # Use EXISTS instead of JOIN+DISTINCT to avoid Postgres DISTINCT/ORDER BY edge-cases
         # and keep search ordering stable.
-        stint_exists = select(PlayerTeamStint.id).where(
+        #
+        # NOTE: build the EXISTS predicate directly to ensure it's correlated to Player.
+        stint_exists = exists().where(
             PlayerTeamStint.player_id == Player.id,
-            PlayerTeamStint.team_id == stint_team_id,
+            PlayerTeamStint.team_id.in_(stint_team_id_list),
         )
         if stint_start_year is not None or stint_end_year is not None:
             start = stint_start_year if stint_start_year is not None else stint_end_year
@@ -52,7 +75,7 @@ async def list_players(
                 PlayerTeamStint.start_year <= end,
                 func.coalesce(PlayerTeamStint.end_year, current_year) >= start,
             )
-        stmt = stmt.where(exists(stint_exists))
+        stmt = stmt.where(stint_exists)
     # Default ordering: Hall of Fame first, then longest career.
     stmt = (
         stmt.order_by(desc(Player.hall_of_fame), desc(career_len), Player.name)

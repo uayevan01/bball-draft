@@ -13,7 +13,15 @@ import { DraftSideColumn } from "@/components/draft-lobby/DraftSideColumn";
 import { MainInfoCard } from "@/components/draft-lobby/MainInfoCard";
 import { PickCard } from "@/components/draft-lobby/PickCard";
 import { PlayerPickerPanel } from "@/components/draft-lobby/PlayerPickerPanel";
-import type { DraftPickWs, PlayerDetail, RollConstraint, SpinPreviewTeam } from "@/components/draft-lobby/types";
+import type {
+  ConstraintTeamSegment,
+  DraftPickWs,
+  EligibilityConstraint,
+  PlayerDetail,
+  RollConstraint,
+  SpinPreviewTeam,
+  TeamLite,
+} from "@/components/draft-lobby/types";
 
 export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
   const searchParams = useSearchParams();
@@ -27,6 +35,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
   const [copied, setCopied] = useState(false);
   const [inviteUrl, setInviteUrl] = useState<string>("");
   const [rules, setRules] = useState<DraftRules | null>(null);
+  const [staticTeams, setStaticTeams] = useState<TeamLite[]>([]);
 
   // Roll/constraint state comes from the websocket so both players see the same spinner + result.
   const [spinPreviewDecade, setSpinPreviewDecade] = useState<string | null>(null);
@@ -121,8 +130,94 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
   const [draftNameInput, setDraftNameInput] = useState("");
 
   const isSpinning = rollStage === "spinning_decade" || rollStage === "spinning_team";
-  const needsConstraint = Boolean(rules?.spin_fields?.includes("year") || rules?.spin_fields?.includes("team"));
-  const canSearch = Boolean(started && canPick && !isSpinning && (!needsConstraint || rollConstraint));
+  const spinsYear = Boolean(rules?.spin_fields?.includes("year"));
+  const spinsTeam = Boolean(rules?.spin_fields?.includes("team"));
+  const usesRoll = spinsYear || spinsTeam;
+
+  const staticTeamAbbrs = useMemo(() => {
+    const tc = rules?.team_constraint;
+    if (!tc || tc.type !== "specific") return null;
+    const opts = tc.options ?? [];
+    if (!opts.length) return null;
+    return opts.map((x) => String(x).toUpperCase());
+  }, [rules]);
+
+  // Resolve a fixed team constraint (e.g. ["LAL"]) to a team row (id/name/logo) so we can filter eligibility.
+  useEffect(() => {
+    let cancelled = false;
+    async function run() {
+      setStaticTeams([]);
+      if (!staticTeamAbbrs?.length) return;
+      if (usesRoll) return;
+      try {
+        const token = await getToken().catch(() => null);
+        const teams = await backendGet<Array<TeamLite & { abbreviation?: string | null }>>("/teams?limit=500", token);
+        if (cancelled) return;
+        const wanted = new Set(staticTeamAbbrs.map((x) => x.toUpperCase()));
+        const hits = teams
+          .filter((t) => (t.abbreviation ? wanted.has(t.abbreviation.toUpperCase()) : false))
+          .sort((a, b) => String(a.abbreviation ?? "").localeCompare(String(b.abbreviation ?? "")));
+        setStaticTeams(hits);
+      } catch {
+        if (!cancelled) setStaticTeams([]);
+      }
+    }
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [staticTeamAbbrs, usesRoll, getToken]);
+
+  const staticYear = useMemo(() => {
+    const yc = rules?.year_constraint;
+    if (!yc) return null;
+    if (yc.type === "any") return { label: "Any year" as const, start: null as number | null, end: null as number | null };
+    if (yc.type === "range") return { label: `${yc.options.startYear}-${yc.options.endYear}`, start: yc.options.startYear, end: yc.options.endYear };
+    if (yc.type === "decade" && yc.options?.length === 1) {
+      const label = yc.options[0];
+      const m = /^(\d{4})-(\d{4})$/.exec(label);
+      if (m) return { label, start: Number(m[1]), end: Number(m[2]) };
+      return { label, start: null, end: null };
+    }
+    if (yc.type === "specific" && yc.options?.length === 1) {
+      const y = yc.options[0];
+      return { label: String(y), start: y, end: y };
+    }
+    // Multiple options without spin: treat as "any" for now (still eligible by team).
+    return { label: "Any year" as const, start: null as number | null, end: null as number | null };
+  }, [rules]);
+
+  const hasAnyConstraintRule = Boolean(
+    usesRoll ||
+      (rules?.team_constraint && rules.team_constraint.type !== "any") ||
+      (rules?.year_constraint && rules.year_constraint.type !== "any"),
+  );
+
+  const eligibilityConstraint = useMemo<EligibilityConstraint | null>(() => {
+    if (!started) return null;
+    if (usesRoll) {
+      if (!rollConstraint) return null;
+      return {
+        teams: [{ team: rollConstraint.team }],
+        yearLabel: rollConstraint.decadeLabel,
+        yearStart: rollConstraint.decadeStart,
+        yearEnd: rollConstraint.decadeEnd,
+      };
+    }
+    if (staticTeams.length) {
+      const segments: ConstraintTeamSegment[] = staticTeams.map((t) => ({ team: t }));
+      return {
+        teams: segments,
+        yearLabel: staticYear?.label ?? "Any year",
+        yearStart: staticYear?.start ?? null,
+        yearEnd: staticYear?.end ?? null,
+      };
+    }
+    return null;
+  }, [started, usesRoll, rollConstraint, staticTeams, staticYear]);
+
+  const constraintReady = !hasAnyConstraintRule || Boolean(eligibilityConstraint);
+  const canSearch = Boolean(started && canPick && !isSpinning && constraintReady);
 
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
 
@@ -151,7 +246,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
 
   // Roll is handled by websocket so both players see the same spinner + result.
   useEffect(() => {
-    if (!needsConstraint) return;
+    if (!usesRoll) return;
     if (!isSpinning) {
       setSpinPreviewDecade(null);
       setSpinPreviewTeam(null);
@@ -265,7 +360,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
     };
     // We intentionally depend on rollStage + isSpinning; preview updates are internal.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [needsConstraint, isSpinning, rollStage]);
+  }, [usesRoll, isSpinning, rollStage]);
 
   // Show a short-lived "X has selected Y" message when a new pick is made.
   useEffect(() => {
@@ -293,6 +388,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
 
   const hostPicks = picks.filter((p) => p.role === "host");
   const guestPicks = picks.filter((p) => p.role === "guest");
+  const picksPerPlayer = draft?.picks_per_player ?? 10;
 
   const [expandedPick, setExpandedPick] = useState<number | null>(null);
   const [detailsByPlayerId, setDetailsByPlayerId] = useState<Record<number, PlayerDetail | undefined>>({});
@@ -396,17 +492,18 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
           currentTurnName={currentTurn ? displayName(currentTurn) : "—"}
           isLocal={isLocal}
           infoMessage={infoMessage}
-          needsConstraint={needsConstraint}
+          showRollButton={usesRoll}
           canRoll={canPick}
           rollButtonLabel={rollConstraint ? "Reroll" : "Roll"}
           rollDisabled={isSpinning}
           onRoll={() => pickSocket.roll()}
+          showConstraint={hasAnyConstraintRule}
           isSpinning={isSpinning}
           rollStage={rollStage}
           spinPreviewDecade={spinPreviewDecade}
           spinPreviewTeam={spinPreviewTeam}
           rollStageDecadeLabel={rollStageDecadeLabel}
-          rollConstraint={rollConstraint}
+          constraint={eligibilityConstraint}
         />
       ) : null}
 
@@ -433,10 +530,11 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
           avatarUrl={avatarUrl("host")}
           isYourTurn={isYourTurnForSide("host")}
           picks={hostPicks as DraftPickWs[]}
-          emptyText="No picks yet."
-          renderPick={(p) => (
+          totalSlots={picksPerPlayer}
+          renderPick={(p, slotNumber) => (
             <PickCard
               key={p.pick_number}
+              slotNumber={slotNumber}
               pick={p}
               isExpanded={expandedPick === p.pick_number}
               detail={detailsByPlayerId[p.player_id]}
@@ -455,17 +553,24 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
           currentTurn={currentTurn}
           isLocal={isLocal}
           onlyEligible={onlyEligible}
-          showOnlyEligibleToggle={needsConstraint && (isLocal || effectiveRole === "host")}
+          showOnlyEligibleToggle={hasAnyConstraintRule && (isLocal || effectiveRole === "host")}
           onOnlyEligibleChange={(v) => host.setOnlyEligiblePlayers(v)}
-          needsConstraint={needsConstraint}
-          rollConstraint={rollConstraint}
+          constraint={eligibilityConstraint}
           drafted={(pid) => draftedIds.has(pid)}
           canSearch={canSearch}
           searchError={null}
           onPickPlayer={(playerId) => {
+            const teams = eligibilityConstraint?.teams ?? [];
+            const teamLabel =
+              teams.length === 0
+                ? null
+                : teams
+                    .map((t) => t.team.abbreviation ?? t.team.name)
+                    .filter(Boolean)
+                    .join(",");
             pickSocket.makePick(playerId, {
-              constraint_team: rollConstraint?.team.abbreviation ?? rollConstraint?.team.name ?? null,
-              constraint_year: rollConstraint?.decadeLabel ?? null,
+              constraint_team: teamLabel,
+              constraint_year: eligibilityConstraint?.yearLabel ?? null,
             });
           }}
         />
@@ -476,10 +581,11 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
           avatarUrl={avatarUrl("guest")}
           isYourTurn={isYourTurnForSide("guest")}
           picks={guestPicks as DraftPickWs[]}
-          emptyText="No picks yet."
-          renderPick={(p) => (
+          totalSlots={picksPerPlayer}
+          renderPick={(p, slotNumber) => (
             <PickCard
               key={p.pick_number}
+              slotNumber={slotNumber}
               pick={p}
               isExpanded={expandedPick === p.pick_number}
               detail={detailsByPlayerId[p.player_id]}
