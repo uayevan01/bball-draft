@@ -24,6 +24,8 @@ class DraftSession:
     first_turn: Role | None = None
     # persisted picks (rehydrated from DB on connect)
     picks: list[dict] = field(default_factory=list)
+    # current rolled constraint (not yet persisted; used so both clients see the roll even if one reconnects)
+    current_constraint: dict | None = None
 
     def other(self, role: Role) -> Role:
         return "guest" if role == "host" else "host"
@@ -78,15 +80,27 @@ class DraftManager:
 
     async def broadcast(self, session: DraftSession, message: dict) -> None:
         async with session.lock:
-            conns = list(session.conns.values())
-        for ws in conns:
-            await ws.send_json(message)
+            conns = list(session.conns.items())  # [(role, ws), ...]
+        dead_roles: list[Role] = []
+        for role, ws in conns:
+            try:
+                await ws.send_json(message)
+            except Exception:
+                dead_roles.append(role)
+        if dead_roles:
+            async with session.lock:
+                for r in dead_roles:
+                    session.conns.pop(r, None)
 
     async def send_to(self, session: DraftSession, role: Role, message: dict) -> None:
         async with session.lock:
             ws = session.conns.get(role)
         if ws:
-            await ws.send_json(message)
+            try:
+                await ws.send_json(message)
+            except Exception:
+                async with session.lock:
+                    session.conns.pop(role, None)
 
     async def start(self, session: DraftSession) -> Role:
         async with session.lock:

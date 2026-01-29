@@ -8,6 +8,7 @@ import { useAuth } from "@clerk/nextjs";
 import { useDraftSocket } from "@/hooks/useDraftSocket";
 import { backendGet, backendPost } from "@/lib/backendClient";
 import type { Draft } from "@/lib/types";
+import type { DraftRules } from "@/lib/draftRules";
 
 export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
   const searchParams = useSearchParams();
@@ -24,6 +25,9 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
   const [selected, setSelected] = useState<{ id: number; name: string; image_url?: string | null } | null>(null);
   const [copied, setCopied] = useState(false);
   const [inviteUrl, setInviteUrl] = useState<string>("");
+  const [rules, setRules] = useState<DraftRules | null>(null);
+
+  // Roll/constraint state comes from the websocket so both players see the same spinner + result.
 
   // Load backend user + draft so we can auto-assign roles for non-local lobbies.
   useEffect(() => {
@@ -47,6 +51,24 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
     };
   }, [draftRef, getToken]);
 
+  // Load draft rules (draft type) once draft is loaded.
+  useEffect(() => {
+    let cancelled = false;
+    async function run() {
+      if (!draft) return;
+      try {
+        const rulesFromDraft = (draft.draft_type?.rules ?? null) as DraftRules | null;
+        if (!cancelled) setRules(rulesFromDraft);
+      } catch {
+        if (!cancelled) setRules(null);
+      }
+    }
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [draft]);
+
   const desiredRole = useMemo<"host" | "guest">(() => {
     if (isLocal) return "host";
     if (!draft || !myId) return "host";
@@ -68,6 +90,20 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
   const lastError = host.lastError ?? guest.lastError;
 
   const started = Boolean(firstTurn);
+
+  const canPick = isLocal || effectiveRole === currentTurn;
+  const pickSocket = isLocal ? (currentTurn === "guest" ? guest : host) : effectiveRole === "guest" ? guest : host;
+
+  const rollStage = host.rollStage ?? guest.rollStage;
+  const rollText = host.rollText ?? guest.rollText;
+  const rollConstraint = host.rollConstraint ?? guest.rollConstraint;
+
+  const isSpinning = rollStage === "spinning_decade" || rollStage === "spinning_team";
+  const needsConstraint = Boolean(rules?.spin_fields?.includes("year") || rules?.spin_fields?.includes("team"));
+  const canSearch = Boolean(started && canPick && !isSpinning && (!needsConstraint || rollConstraint));
+  const canConfirmPick = Boolean(started && selected && canPick && !isSpinning && (!needsConstraint || rollConstraint));
+
+  const [infoMessage, setInfoMessage] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -97,14 +133,20 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
     async function run() {
       setSearchError(null);
       const term = q.trim();
-      if (!term) {
+      if (!term || !canSearch) {
         setResults([]);
         return;
       }
       try {
-        const data = await backendGet<Array<{ id: number; name: string; image_url?: string | null }>>(
-          `/players?q=${encodeURIComponent(term)}&limit=10`,
-        );
+        const params = new URLSearchParams();
+        params.set("q", term);
+        params.set("limit", "10");
+        if (rollConstraint) {
+          params.set("stint_team_id", String(rollConstraint.team.id));
+          params.set("stint_start_year", String(rollConstraint.decadeStart));
+          params.set("stint_end_year", String(rollConstraint.decadeEnd));
+        }
+        const data = await backendGet<Array<{ id: number; name: string; image_url?: string | null }>>(`/players?${params.toString()}`);
         if (!cancelled) setResults(data);
       } catch (e) {
         if (!cancelled) setSearchError(e instanceof Error ? e.message : "Search failed");
@@ -115,12 +157,22 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
       cancelled = true;
       clearTimeout(t);
     };
-  }, [q]);
+  }, [q, canSearch, rollConstraint]);
 
-  const canPick = isLocal || effectiveRole === currentTurn;
-  const pickSocket = isLocal ? (currentTurn === "guest" ? guest : host) : effectiveRole === "guest" ? guest : host;
+  // Roll is handled by websocket so both players see the same spinner + result.
 
-  const canConfirmPick = Boolean(started && selected && canPick);
+  // Show a short-lived "X has selected Y" message when a new pick is made.
+  useEffect(() => {
+    if (!picks.length) return;
+    const last = [...picks].sort((a, b) => b.pick_number - a.pick_number)[0];
+    if (!last) return;
+    const picker = displayName(last.role);
+    const msg = `${picker} has selected ${last.player_name}`;
+    setInfoMessage(msg);
+    const t = window.setTimeout(() => setInfoMessage(null), 3000);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [picks.length]);
 
   function displayName(side: "host" | "guest"): string {
     const u = side === "host" ? draft?.host : draft?.guest;
@@ -220,7 +272,16 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
               </div>
               <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-600 dark:text-zinc-300">
                 <span>Years active: {yearsActiveLabel(detail)}</span>
-                <span>Constraints: —</span>
+                <span>
+                  Constraints:{" "}
+                  {p.constraint_year || p.constraint_team ? (
+                    <span className="text-zinc-950 dark:text-white">
+                      {[p.constraint_year, p.constraint_team].filter(Boolean).join(" • ")}
+                    </span>
+                  ) : (
+                    "—"
+                  )}
+                </span>
               </div>
             </div>
           </div>
@@ -343,6 +404,54 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
         </div>
       ) : null}
 
+      {/* Main info box (roll + status). */}
+      {started ? (
+        <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-900/50">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">Current turn</div>
+              <div className="mt-1 text-sm font-semibold text-zinc-950 dark:text-white">
+                {currentTurn ? displayName(currentTurn) : "—"}
+                {isLocal ? <span className="ml-2 text-xs font-normal text-zinc-500 dark:text-zinc-400">(local)</span> : null}
+              </div>
+              {infoMessage ? (
+                <div className="mt-2 text-sm text-zinc-700 dark:text-zinc-200">{infoMessage}</div>
+              ) : null}
+              {needsConstraint ? (
+                <div className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
+                  {isSpinning && rollText ? (
+                    rollText
+                  ) : rollConstraint ? (
+                    <>
+                      Constraint: <span className="font-semibold text-zinc-950 dark:text-white">{rollConstraint.decadeLabel}</span>{" "}
+                      • <span className="font-semibold text-zinc-950 dark:text-white">{rollConstraint.team.name}</span>
+                    </>
+                  ) : (
+                    "Constraint: click Roll to spin decade + team."
+                  )}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="flex flex-none items-center gap-2">
+              {needsConstraint && canPick ? (
+                <button
+                  type="button"
+                  onClick={() => pickSocket.roll()}
+                  disabled={isSpinning}
+                  className="h-10 rounded-full bg-zinc-950 px-4 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-60 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
+                >
+                  {rollConstraint ? "Reroll" : "Roll"}
+                </button>
+              ) : null}
+              {!needsConstraint && canPick ? (
+                <div className="text-xs text-zinc-500 dark:text-zinc-400">No roll required for this draft type.</div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {!started ? (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-black/10 bg-white px-4 py-3 text-sm dark:border-white/10 dark:bg-zinc-900/50">
           <label className="flex items-center gap-2">
@@ -420,7 +529,10 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
                           disabled={!canConfirmPick}
                           onClick={() => {
                             if (!selected) return;
-                            pickSocket.makePick(selected.id);
+                            pickSocket.makePick(selected.id, {
+                              constraint_team: rollConstraint?.team.abbreviation ?? rollConstraint?.team.name ?? null,
+                              constraint_year: rollConstraint?.decadeLabel ?? null,
+                            });
                             setSelected(null);
                           }}
                           className="h-10 rounded-full bg-zinc-950 px-4 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-60 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
@@ -441,7 +553,8 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
                   className="h-11 rounded-xl border border-black/10 bg-white px-3 text-sm dark:border-white/10 dark:bg-zinc-900/60"
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
-                  placeholder="Search player name…"
+                  placeholder={canSearch ? "Search player name…" : needsConstraint ? "Spin constraint to search…" : "Search player name…"}
+                  disabled={!canSearch}
                 />
                 {searchError ? <div className="text-sm text-red-700 dark:text-red-300">{searchError}</div> : null}
 
@@ -450,6 +563,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
                     <button
                       key={p.id}
                       type="button"
+                      disabled={!canSearch}
                       onClick={() => setSelected(p)}
                       className="flex items-center justify-between rounded-xl border border-black/10 px-3 py-2 text-left text-sm hover:bg-black/5 disabled:opacity-60 dark:border-white/10 dark:hover:bg-white/10"
                     >

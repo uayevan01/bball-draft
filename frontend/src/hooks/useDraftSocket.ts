@@ -19,6 +19,12 @@ type DraftWsMessage =
         constraint_team?: string | null;
         constraint_year?: string | null;
       }>;
+      constraint?: {
+        decadeLabel: string;
+        decadeStart: number;
+        decadeEnd: number;
+        team: { id: number; name: string; abbreviation?: string | null; logo_url?: string | null };
+      } | null;
     }
   | { type: "lobby_update"; draft_id: number; connected: string[] }
   | { type: "draft_started"; draft_id: number; first_turn: string }
@@ -30,8 +36,27 @@ type DraftWsMessage =
       player_id: number;
       player_name: string;
       player_image_url?: string | null;
+      constraint_team?: string | null;
+      constraint_year?: string | null;
       next_turn: "host" | "guest";
     }
+  | {
+      type: "roll_started";
+      draft_id: number;
+      by_role: "host" | "guest";
+      stage: "decade" | "team";
+      decade_label?: string;
+    }
+  | {
+      type: "roll_result";
+      draft_id: number;
+      by_role: "host" | "guest";
+      decade_label: string;
+      decade_start: number;
+      decade_end: number;
+      team: { id: number; name: string; abbreviation?: string | null; logo_url?: string | null };
+    }
+  | { type: "roll_error"; draft_id: number; message: string }
   | { type: "error"; message: string };
 
 export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled: boolean = true) {
@@ -39,9 +64,25 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
   const [firstTurn, setFirstTurn] = useState<string | null>(null);
   const [currentTurn, setCurrentTurn] = useState<"host" | "guest" | null>(null);
   const [picks, setPicks] = useState<
-    Array<{ pick_number: number; role: "host" | "guest"; player_id: number; player_name: string; player_image_url?: string | null }>
+    Array<{
+      pick_number: number;
+      role: "host" | "guest";
+      player_id: number;
+      player_name: string;
+      player_image_url?: string | null;
+      constraint_team?: string | null;
+      constraint_year?: string | null;
+    }>
   >([]);
   const [lastError, setLastError] = useState<string | null>(null);
+  const [rollStage, setRollStage] = useState<null | "idle" | "spinning_decade" | "spinning_team">(null);
+  const [rollText, setRollText] = useState<string | null>(null);
+  const [rollConstraint, setRollConstraint] = useState<{
+    decadeLabel: string;
+    decadeStart: number;
+    decadeEnd: number;
+    team: { id: number; name: string; abbreviation?: string | null; logo_url?: string | null };
+  } | null>(null);
   const [status, setStatus] = useState<"disabled" | "connecting" | "open" | "closed">(
     enabled ? "connecting" : "disabled",
   );
@@ -93,6 +134,11 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
               if (msg.current_turn === "host" || msg.current_turn === "guest") {
                 setCurrentTurn(msg.current_turn);
               }
+              if (msg.constraint) {
+                setRollConstraint(msg.constraint);
+              } else {
+                setRollConstraint(null);
+              }
               if (Array.isArray(msg.picks)) {
                 setPicks(
                   msg.picks
@@ -102,6 +148,8 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
                       player_id: p.player_id,
                       player_name: p.player_name,
                       player_image_url: p.player_image_url ?? null,
+                      constraint_team: p.constraint_team ?? null,
+                      constraint_year: p.constraint_year ?? null,
                     }))
                     .sort((a, b) => a.pick_number - b.pick_number),
                 );
@@ -121,9 +169,36 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
                 player_id: msg.player_id,
                 player_name: msg.player_name,
                 player_image_url: msg.player_image_url ?? null,
+                constraint_team: msg.constraint_team ?? null,
+                constraint_year: msg.constraint_year ?? null,
               },
             ].sort((a, b) => a.pick_number - b.pick_number));
             setCurrentTurn(msg.next_turn);
+            // New turn => clear previous roll constraint.
+            setRollConstraint(null);
+            setRollStage(null);
+            setRollText(null);
+          } else if (msg.type === "roll_started") {
+            if (msg.stage === "decade") {
+              setRollStage("spinning_decade");
+              setRollText("Spinning decade…");
+            } else {
+              setRollStage("spinning_team");
+              setRollText(`Spinning team… (${msg.decade_label ?? ""})`);
+            }
+          } else if (msg.type === "roll_result") {
+            setRollStage("idle");
+            setRollText(null);
+            setRollConstraint({
+              decadeLabel: msg.decade_label,
+              decadeStart: msg.decade_start,
+              decadeEnd: msg.decade_end,
+              team: msg.team,
+            });
+          } else if (msg.type === "roll_error") {
+            setRollStage("idle");
+            setRollText(null);
+            setLastError(msg.message);
           }
         } catch {
           // ignore
@@ -160,16 +235,32 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
     ws.send(JSON.stringify({ type: "start_draft" }));
   }
 
-  function makePick(playerId: number) {
+  function makePick(playerId: number, opts?: { constraint_team?: string | null; constraint_year?: string | null }) {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       setLastError("WebSocket closed");
       return;
     }
-    ws.send(JSON.stringify({ type: "make_pick", player_id: playerId }));
+    ws.send(
+      JSON.stringify({
+        type: "make_pick",
+        player_id: playerId,
+        constraint_team: opts?.constraint_team ?? null,
+        constraint_year: opts?.constraint_year ?? null,
+      }),
+    );
   }
 
-  return { connectedRoles, firstTurn, currentTurn, picks, lastError, status, startDraft, makePick };
+  function roll() {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      setLastError("WebSocket closed");
+      return;
+    }
+    ws.send(JSON.stringify({ type: "roll" }));
+  }
+
+  return { connectedRoles, firstTurn, currentTurn, picks, lastError, status, startDraft, makePick, roll, rollStage, rollText, rollConstraint };
 }
 
 

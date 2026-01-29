@@ -21,6 +21,7 @@ export type Draft = {
   completed_at?: string | null;
   host?: User;
   guest?: User | null;
+  draft_type?: DraftType | null;
   picks?: DraftPick[];
 };
 

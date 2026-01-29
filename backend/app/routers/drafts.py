@@ -59,6 +59,7 @@ async def create_draft(
             joinedload(Draft.picks),
             joinedload(Draft.host),
             joinedload(Draft.guest),
+            joinedload(Draft.draft_type),
         )
     )
     return (await db.execute(stmt)).unique().scalar_one()
@@ -74,7 +75,7 @@ async def draft_history(
     stmt = (
         select(Draft)
         .where(or_(Draft.host_id == user.id, Draft.guest_id == user.id))
-        .options(joinedload(Draft.host), joinedload(Draft.guest), joinedload(Draft.picks))
+        .options(joinedload(Draft.host), joinedload(Draft.guest), joinedload(Draft.picks), joinedload(Draft.draft_type))
         .order_by(Draft.created_at.desc())
         .limit(limit)
         .offset(offset)
@@ -94,6 +95,7 @@ async def get_draft(
         joinedload(Draft.picks).joinedload(DraftPick.player),
         joinedload(Draft.host),
         joinedload(Draft.guest),
+        joinedload(Draft.draft_type),
     )
     draft = (await db.execute(stmt)).unique().scalar_one_or_none()
     if not draft:
@@ -137,7 +139,7 @@ async def join_draft(
     stmt = (
         select(Draft)
         .where(Draft.id == draft.id)
-        .options(joinedload(Draft.picks), joinedload(Draft.host), joinedload(Draft.guest))
+        .options(joinedload(Draft.picks), joinedload(Draft.host), joinedload(Draft.guest), joinedload(Draft.draft_type))
     )
     return (await db.execute(stmt)).unique().scalar_one()
 

@@ -6,6 +6,7 @@ from datetime import datetime
 from pydantic import Field
 
 from app.schemas.base import ORMBaseModel
+from app.schemas.draft_type import DraftTypeOut
 from app.schemas.user import UserOut
 
 
@@ -40,6 +41,7 @@ class DraftOut(ORMBaseModel):
 
     host: UserOut | None = None
     guest: UserOut | None = None
+    draft_type: DraftTypeOut | None = None
     picks: list[DraftPickOut] = Field(default_factory=list)
 
 
