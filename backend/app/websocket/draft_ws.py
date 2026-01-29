@@ -10,6 +10,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.websocket.draft_manager import Role, draft_manager
 from app.database import SessionLocal
 from app.models import Draft, DraftPick, DraftType, Player, Team
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import joinedload
 
@@ -331,6 +332,17 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
                     if not player:
                         await draft_manager.send_to(session, role, {"type": "error", "message": "Player not found"})
                         continue
+                    # Prevent duplicate players in the same draft.
+                    existing = (
+                        await db.execute(
+                            select(DraftPick.id)
+                            .where(DraftPick.draft_id == draft_id, DraftPick.player_id == player_id)
+                            .limit(1)
+                        )
+                    ).scalar_one_or_none()
+                    if existing is not None:
+                        await draft_manager.send_to(session, role, {"type": "error", "message": "Player already drafted"})
+                        continue
                     # Map websocket role -> draft participant.
                     user_id = draft.host_id if role == "host" else (draft.guest_id or draft.host_id)
                     db.add(
@@ -344,7 +356,12 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
                             constraint_year=constraint_year,
                         )
                     )
-                    await db.commit()
+                    try:
+                        await db.commit()
+                    except IntegrityError:
+                        await db.rollback()
+                        await draft_manager.send_to(session, role, {"type": "error", "message": "Player already drafted"})
+                        continue
 
                 # Update in-memory pick list too (for newly-connected clients that rely on lobby_ready state).
                 async with session.lock:

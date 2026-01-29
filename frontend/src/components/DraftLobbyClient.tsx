@@ -28,6 +28,12 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
   const [rules, setRules] = useState<DraftRules | null>(null);
 
   // Roll/constraint state comes from the websocket so both players see the same spinner + result.
+  const [spinPreviewDecade, setSpinPreviewDecade] = useState<string | null>(null);
+  const [spinPreviewTeam, setSpinPreviewTeam] = useState<{
+    name: string;
+    abbreviation?: string | null;
+    logo_url?: string | null;
+  } | null>(null);
 
   // Load backend user + draft so we can auto-assign roles for non-local lobbies.
   useEffect(() => {
@@ -109,7 +115,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
   const pickSocket = isLocal ? (currentTurn === "guest" ? guest : host) : effectiveRole === "guest" ? guest : host;
 
   const rollStage = stateSocket.rollStage;
-  const rollText = stateSocket.rollText;
+  const rollStageDecadeLabel = stateSocket.rollStageDecadeLabel;
   const rollConstraint = stateSocket.rollConstraint;
   const onlyEligible = stateSocket.onlyEligible;
 
@@ -174,6 +180,122 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
   }, [q, canSearch, rollConstraint, onlyEligible]);
 
   // Roll is handled by websocket so both players see the same spinner + result.
+  useEffect(() => {
+    if (!needsConstraint) return;
+    if (!isSpinning) {
+      setSpinPreviewDecade(null);
+      setSpinPreviewTeam(null);
+      return;
+    }
+
+    // Exponential slowdown (mirrors nba_draft.py ease_in_expo scheduling)
+    function easeInExpo(t: number): number {
+      if (t <= 0) return 0;
+      if (t >= 1) return 1;
+      return 2 ** (10 * (t - 1));
+    }
+    function scheduleSpin<T>(
+      opts: T[],
+      setValue: (v: T) => void,
+      totalMs: number,
+      steps: number,
+      cancelledRef: { cancelled: boolean },
+    ) {
+      const start = performance.now();
+      const pickRandom = () => opts[Math.floor(Math.random() * opts.length)];
+      const step = (i: number) => {
+        if (cancelledRef.cancelled) return;
+        if (i >= steps) return;
+        const t = steps <= 1 ? 1 : i / (steps - 1);
+        const progress = easeInExpo(t);
+        const target = start + progress * totalMs;
+        const delay = Math.max(0, target - performance.now());
+        window.setTimeout(() => {
+          if (cancelledRef.cancelled) return;
+          setValue(pickRandom());
+          step(i + 1);
+        }, delay);
+      };
+      if (opts.length) step(0);
+    }
+
+    const cancelledRef = { cancelled: false };
+
+    // Decade animation with exponential slowdown
+    if (rollStage === "spinning_decade") {
+      const decadeOptions =
+        (rules?.year_constraint?.type === "decade" && rules?.year_constraint?.options?.length
+          ? rules.year_constraint.options
+          : ["1950-1959", "1960-1969", "1970-1979", "1980-1989", "1990-1999", "2000-2009", "2010-2019", "2020-2029"]) ?? [];
+      scheduleSpin<string | null>(
+        decadeOptions.map((x) => x ?? null),
+        (v) => setSpinPreviewDecade(v),
+        900,
+        55,
+        cancelledRef,
+      );
+    }
+
+    // Team animation: fetch a pool for the decade and cycle quickly through it.
+    let cancelled = false;
+    async function startTeamSpin() {
+      if (rollStage !== "spinning_team") return;
+      const label = rollStageDecadeLabel ?? null;
+      const m = label ? /^(\d{4})-(\d{4})$/.exec(label) : null;
+      if (!m) return;
+      const start = Number(m[1]);
+      const end = Number(m[2]);
+      try {
+        const teams = await backendGet<
+          Array<{
+            id: number;
+            name: string;
+            abbreviation?: string | null;
+            logo_url?: string | null;
+            conference?: string | null;
+            division?: string | null;
+          }>
+        >(`/teams?active_start_year=${start}&active_end_year=${end}&limit=500`);
+        if (cancelled) return;
+
+        let pool = teams;
+        const tc = rules?.team_constraint;
+        if (tc?.type === "conference" && tc.options?.length) {
+          const allowed = new Set(tc.options.map((x) => String(x)));
+          pool = pool.filter((t) => (t.conference ? allowed.has(t.conference) : false));
+        } else if (tc?.type === "division" && tc.options?.length) {
+          const allowed = new Set(tc.options.map((x) => String(x)));
+          pool = pool.filter((t) => (t.division ? allowed.has(t.division) : false));
+        } else if (tc?.type === "specific" && tc.options?.length) {
+          const set = new Set(tc.options.map((x) => String(x).toUpperCase()));
+          pool = pool.filter((t) => (t.abbreviation ? set.has(t.abbreviation.toUpperCase()) : false));
+        }
+        if (!pool.length) pool = teams;
+        if (!pool.length) return;
+        scheduleSpin(
+          pool.map((pick) => ({
+            name: pick.name,
+            abbreviation: pick.abbreviation,
+            logo_url: pick.logo_url,
+          })),
+          (v) => setSpinPreviewTeam(v),
+          1500,
+          60,
+          cancelledRef,
+        );
+      } catch {
+        // ignore animation fetch errors; final result still comes from server
+      }
+    }
+    void startTeamSpin();
+
+    return () => {
+      cancelled = true;
+      cancelledRef.cancelled = true;
+    };
+    // We intentionally depend on rollStage + isSpinning; preview updates are internal.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needsConstraint, isSpinning, rollStage]);
 
   // Show a short-lived "X has selected Y" message when a new pick is made.
   useEffect(() => {
@@ -220,6 +342,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
     for (const p of picks) ids.add(p.player_id);
     return Array.from(ids.values());
   }, [picks]);
+  const draftedIds = useMemo(() => new Set<number>(pickedPlayerIds), [pickedPlayerIds]);
 
   async function ensurePlayerDetails(playerId: number) {
     if (detailsByPlayerId[playerId]) return;
@@ -256,6 +379,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
 
   const selectedEligibility = useMemo<null | boolean>(() => {
     if (!selected) return null;
+    if (draftedIds.has(selected.id)) return false;
     if (!needsConstraint || !rollConstraint) return true;
     if (onlyEligible) return true;
     const detail = detailsByPlayerId[selected.id];
@@ -265,11 +389,12 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
     const start = rollConstraint.decadeStart;
     const end = rollConstraint.decadeEnd;
     return stints.some((s) => s.team_id === teamId && s.start_year <= end && (s.end_year ?? 9999) >= start);
-  }, [selected, needsConstraint, rollConstraint, onlyEligible, detailsByPlayerId]);
+  }, [selected, needsConstraint, rollConstraint, onlyEligible, detailsByPlayerId, draftedIds]);
 
   const canConfirmPick = Boolean(
     started &&
       selected &&
+      !draftedIds.has(selected.id) &&
       canPick &&
       !isSpinning &&
       (!needsConstraint || rollConstraint) &&
@@ -452,8 +577,8 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
       {/* Main info box (roll + status). */}
       {started ? (
         <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-900/50">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="min-w-0">
+          <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-center">
+            <div className="min-w-0 text-center md:text-left">
               <div className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">Current turn</div>
               <div className="mt-1 text-sm font-semibold text-zinc-950 dark:text-white">
                 {currentTurn ? displayName(currentTurn) : "—"}
@@ -462,23 +587,9 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
               {infoMessage ? (
                 <div className="mt-2 text-sm text-zinc-700 dark:text-zinc-200">{infoMessage}</div>
               ) : null}
-              {needsConstraint ? (
-                <div className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
-                  {isSpinning && rollText ? (
-                    rollText
-                  ) : rollConstraint ? (
-                    <>
-                      Constraint: <span className="font-semibold text-zinc-950 dark:text-white">{rollConstraint.decadeLabel}</span>{" "}
-                      • <span className="font-semibold text-zinc-950 dark:text-white">{rollConstraint.team.name}</span>
-                    </>
-                  ) : (
-                    "Constraint: click Roll to spin decade + team."
-                  )}
-                </div>
-              ) : null}
             </div>
 
-            <div className="flex flex-none items-center gap-2">
+            <div className="flex flex-none items-center justify-center gap-2 md:justify-end">
               {needsConstraint && canPick ? (
                 <button
                   type="button"
@@ -494,6 +605,60 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
               ) : null}
             </div>
           </div>
+
+          {needsConstraint ? (
+            <div className="mt-4 flex justify-center">
+              <div className="w-full max-w-3xl rounded-2xl border border-black/10 bg-black/5 px-5 py-4 text-center dark:border-white/10 dark:bg-white/10">
+                {isSpinning ? (
+                  <div className="grid justify-items-center gap-2">
+                    {rollStage === "spinning_team" && spinPreviewTeam?.logo_url ? (
+                      <Image
+                        src={spinPreviewTeam.logo_url}
+                        alt={spinPreviewTeam.name}
+                        width={64}
+                        height={64}
+                        className="h-16 w-16 rounded-xl object-contain"
+                      />
+                    ) : (
+                      <div className="h-16 w-16 rounded-xl border border-black/10 bg-white/60 dark:border-white/10 dark:bg-zinc-900/60" />
+                    )}
+                    <div className="text-xs font-semibold tracking-wide text-zinc-600 dark:text-zinc-300">
+                      {rollStage === "spinning_decade" ? "SPINNING DECADE" : "SPINNING TEAM"}
+                    </div>
+                    <div className="text-lg font-semibold text-zinc-950 dark:text-white">
+                      {rollStage === "spinning_decade"
+                        ? spinPreviewDecade ?? "—"
+                        : spinPreviewTeam?.name ?? "—"}
+                    </div>
+                    <div className="text-sm text-zinc-700 dark:text-zinc-200">
+                      {rollStage === "spinning_team"
+                        ? `(${rollStageDecadeLabel ?? "—"})`
+                        : " "}
+                    </div>
+                  </div>
+                ) : rollConstraint ? (
+                  <div className="grid justify-items-center gap-2">
+                    {rollConstraint.team.logo_url ? (
+                      <Image
+                        src={rollConstraint.team.logo_url}
+                        alt={rollConstraint.team.name}
+                        width={72}
+                        height={72}
+                        className="h-[72px] w-[72px] rounded-2xl object-contain"
+                      />
+                    ) : (
+                      <div className="h-[72px] w-[72px] rounded-2xl border border-black/10 bg-white/60 dark:border-white/10 dark:bg-zinc-900/60" />
+                    )}
+                    <div className="text-xs font-semibold tracking-wide text-zinc-600 dark:text-zinc-300">CONSTRAINT</div>
+                    <div className="text-xl font-bold text-zinc-950 dark:text-white">{rollConstraint.team.name}</div>
+                    <div className="text-base font-semibold text-zinc-700 dark:text-zinc-200">{rollConstraint.decadeLabel}</div>
+                  </div>
+                ) : (
+                  <div className="text-sm text-zinc-600 dark:text-zinc-300">Constraint: click Roll to spin decade + team.</div>
+                )}
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -548,7 +713,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
               <div className="mt-3 grid gap-3">
                 {selected ? (
                   <div className="rounded-xl border border-black/10 bg-black/5 p-3 dark:border-white/10 dark:bg-white/10">
-                    <div className="flex items-center justify-between gap-3">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <div className="flex min-w-0 items-center gap-3">
                         <Image
                           src={selected.image_url ?? "/avatar-placeholder.svg"}
@@ -561,11 +726,11 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
                           <div className="truncate text-sm font-semibold">{selected.name}</div>
                         </div>
                       </div>
-                      <div className="flex flex-none items-center gap-2">
+                      <div className="flex flex-wrap justify-end gap-2">
                         <button
                           type="button"
                           onClick={() => setSelected(null)}
-                          className="h-10 rounded-full border border-black/10 bg-white px-3 text-sm font-semibold text-zinc-950 hover:bg-black/5 dark:border-white/10 dark:bg-zinc-900 dark:text-white dark:hover:bg-zinc-800"
+                          className="h-10 whitespace-nowrap rounded-full border border-black/10 bg-white px-3 text-sm font-semibold text-zinc-950 hover:bg-black/5 dark:border-white/10 dark:bg-zinc-900 dark:text-white dark:hover:bg-zinc-800"
                         >
                           Clear
                         </button>
@@ -580,7 +745,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
                             });
                             setSelected(null);
                           }}
-                          className="h-10 rounded-full bg-zinc-950 px-4 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-60 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
+                          className="h-10 whitespace-nowrap rounded-full bg-zinc-950 px-4 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-60 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
                         >
                           Confirm pick
                         </button>
@@ -601,10 +766,15 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
                           </span>
                         ) : (
                           <span className="text-red-700 dark:text-red-300">
-                            Can’t select this player — no stint found for {rollConstraint.team.name} during {rollConstraint.decadeLabel}.
+                            {draftedIds.has(selected.id)
+                              ? "Can’t select this player — already drafted."
+                              : `Can’t select this player — no stint found for ${rollConstraint.team.name} during ${rollConstraint.decadeLabel}.`}
                           </span>
                         )}
                       </div>
+                    ) : null}
+                    {onlyEligible && selected && draftedIds.has(selected.id) ? (
+                      <div className="mt-2 text-xs text-red-700 dark:text-red-300">Can’t select this player — already drafted.</div>
                     ) : null}
                   </div>
                 ) : null}
@@ -632,10 +802,13 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
 
                 <div className="grid gap-2">
                   {results.map((p) => (
+                    (() => {
+                      const isDrafted = draftedIds.has(p.id);
+                      return (
                     <button
                       key={p.id}
                       type="button"
-                      disabled={!canSearch}
+                      disabled={!canSearch || isDrafted}
                       onClick={() => setSelected(p)}
                       className="flex items-center justify-between rounded-xl border border-black/10 px-3 py-2 text-left text-sm hover:bg-black/5 disabled:opacity-60 dark:border-white/10 dark:hover:bg-white/10"
                     >
@@ -649,8 +822,10 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
                         />
                         <span className="truncate">{p.name}</span>
                       </span>
-                      <span className="text-xs text-zinc-500 dark:text-zinc-400">Select</span>
+                      <span className="text-xs text-zinc-500 dark:text-zinc-400">{isDrafted ? "Drafted" : "Select"}</span>
                     </button>
+                      );
+                    })()
                   ))}
                   {results.length === 0 && q.trim() ? (
                     <div className="text-sm text-zinc-600 dark:text-zinc-300">No results.</div>

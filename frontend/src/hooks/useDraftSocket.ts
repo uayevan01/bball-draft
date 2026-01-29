@@ -79,6 +79,7 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
   const [lastError, setLastError] = useState<string | null>(null);
   const [rollStage, setRollStage] = useState<null | "idle" | "spinning_decade" | "spinning_team">(null);
   const [rollText, setRollText] = useState<string | null>(null);
+  const [rollStageDecadeLabel, setRollStageDecadeLabel] = useState<string | null>(null);
   const [rollConstraint, setRollConstraint] = useState<{
     decadeLabel: string;
     decadeStart: number;
@@ -122,6 +123,8 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
       setRollStage(null);
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setRollText(null);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setRollStageDecadeLabel(null);
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setRollConstraint(null);
       // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -201,17 +204,21 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
             setRollConstraint(null);
             setRollStage(null);
             setRollText(null);
+            setRollStageDecadeLabel(null);
           } else if (msg.type === "roll_started") {
             if (msg.stage === "decade") {
               setRollStage("spinning_decade");
               setRollText("Spinning decade…");
+              setRollStageDecadeLabel(null);
             } else {
               setRollStage("spinning_team");
               setRollText(`Spinning team… (${msg.decade_label ?? ""})`);
+              setRollStageDecadeLabel(msg.decade_label ?? null);
             }
           } else if (msg.type === "roll_result") {
             setRollStage("idle");
             setRollText(null);
+            setRollStageDecadeLabel(null);
             setRollConstraint({
               decadeLabel: msg.decade_label,
               decadeStart: msg.decade_start,
@@ -221,6 +228,7 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
           } else if (msg.type === "roll_error") {
             setRollStage("idle");
             setRollText(null);
+            setRollStageDecadeLabel(null);
             setLastError(msg.message);
           } else if (msg.type === "only_eligible_updated") {
             setOnlyEligible(msg.value);
@@ -306,6 +314,7 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
     roll,
     rollStage,
     rollText,
+    rollStageDecadeLabel,
     rollConstraint,
     onlyEligible,
     setOnlyEligiblePlayers,
