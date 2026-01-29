@@ -36,6 +36,7 @@ class DraftOut(ORMBaseModel):
     picks_per_player: int
     show_suggestions: bool
     status: str
+    name: str | None = None
     created_at: datetime
     completed_at: datetime | None = None
 

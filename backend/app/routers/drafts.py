@@ -45,6 +45,7 @@ async def create_draft(
         host_id=user.id,
         picks_per_player=payload.picks_per_player,
         show_suggestions=payload.show_suggestions,
+        name=dt.name,
         status="lobby",
     )
     db.add(draft)

@@ -190,6 +190,8 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
         async with session.lock:
             if session.only_eligible is None:
                 session.only_eligible = bool(True if suggest is None else suggest)
+            if session.draft_name is None:
+                session.draft_name = draft.name
 
     await draft_manager.broadcast(
         session,
@@ -204,6 +206,7 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
             "picks": session.picks,
             "constraint": session.current_constraint,
             "only_eligible": session.only_eligible,
+            "draft_name": session.draft_name,
         },
     )
 
@@ -301,6 +304,34 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
                 await draft_manager.broadcast(
                     session,
                     {"type": "only_eligible_updated", "draft_id": draft_id, "value": value},
+                )
+            elif msg_type == "set_draft_name":
+                if role != "host":
+                    await draft_manager.send_to(session, role, {"type": "error", "message": "Only host can rename the draft"})
+                    continue
+                value = data.get("value")
+                if not isinstance(value, str):
+                    await draft_manager.send_to(session, role, {"type": "error", "message": "value must be a string"})
+                    continue
+                name = value.strip()
+                if not name:
+                    await draft_manager.send_to(session, role, {"type": "error", "message": "Name cannot be blank"})
+                    continue
+                if len(name) > 120:
+                    await draft_manager.send_to(session, role, {"type": "error", "message": "Name too long (max 120)"})
+                    continue
+                async with SessionLocal() as db:
+                    draft = await db.get(Draft, draft_id)
+                    if not draft:
+                        await draft_manager.send_to(session, role, {"type": "error", "message": "Draft not found"})
+                        continue
+                    draft.name = name
+                    await db.commit()
+                async with session.lock:
+                    session.draft_name = name
+                await draft_manager.broadcast(
+                    session,
+                    {"type": "draft_name_updated", "draft_id": draft_id, "value": name},
                 )
             elif msg_type == "make_pick":
                 player_id = data.get("player_id")

@@ -5,6 +5,15 @@ const nextConfig: NextConfig = {
   reactCompiler: true,
   images: {
     remotePatterns: [
+      // Clerk user avatars (common host).
+      {
+        protocol: "https",
+        hostname: "img.clerk.com",
+      },
+      {
+        protocol: "https",
+        hostname: "images.clerk.dev",
+      },
       {
         protocol: "https",
         hostname: "www.basketball-reference.com",

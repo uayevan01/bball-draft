@@ -12,6 +12,7 @@ class UserOut(ORMBaseModel):
     id: uuid.UUID
     clerk_id: str
     full_name: str | None = None
+    avatar_url: str | None = None
     username: str | None = None
     email: str | None = None
     created_at: datetime
@@ -20,5 +21,7 @@ class UserOut(ORMBaseModel):
 class UserUpdate(ORMBaseModel):
     full_name: str | None = Field(default=None, max_length=140)
     username: str | None = Field(default=None, min_length=3, max_length=30, pattern=r"^[a-zA-Z0-9_]+$")
+    email: str | None = Field(default=None, max_length=255)
+    avatar_url: str | None = Field(default=None, max_length=500)
 
 

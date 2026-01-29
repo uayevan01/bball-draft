@@ -11,6 +11,7 @@ export type DraftType = {
 export type Draft = {
   id: number;
   public_id: string;
+  name?: string | null;
   draft_type_id: number;
   host_id: string;
   guest_id?: string | null;
@@ -29,6 +30,7 @@ export type User = {
   id: string;
   clerk_id: string;
   full_name?: string | null;
+  avatar_url?: string | null;
   username?: string | null;
   email?: string | null;
   created_at: string;

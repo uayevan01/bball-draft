@@ -29,6 +29,7 @@ export function UsernameSettings() {
 
   const clerkFullName = clerkUser?.fullName ?? null;
   const clerkEmail = clerkUser?.primaryEmailAddress?.emailAddress ?? null;
+  const clerkAvatarUrl = clerkUser?.imageUrl ?? null;
   const suggestedHandle = useMemo(() => deriveHandleFromEmail(clerkEmail), [clerkEmail]);
 
   const [username, setUsername] = useState("");
@@ -50,6 +51,15 @@ export function UsernameSettings() {
           const updated = await backendPatch<User>("/me", { full_name: clerkFullName }, token);
           if (!cancelled) setMe(updated);
         }
+        // One-time sync: JWT often doesn't include these, but Clerk frontend always has them.
+        if ((!m.email && clerkEmail) || (!m.avatar_url && clerkAvatarUrl)) {
+          const updated = await backendPatch<User>(
+            "/me",
+            { email: clerkEmail ?? null, avatar_url: clerkAvatarUrl ?? null },
+            token,
+          );
+          if (!cancelled) setMe(updated);
+        }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load profile");
       } finally {
@@ -60,7 +70,7 @@ export function UsernameSettings() {
     return () => {
       cancelled = true;
     };
-  }, [clerkFullName, getToken]);
+  }, [clerkAvatarUrl, clerkEmail, clerkFullName, getToken]);
 
   async function save() {
     setSaving(true);

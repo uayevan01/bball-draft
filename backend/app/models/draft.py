@@ -29,6 +29,7 @@ class Draft(Base):
 
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="lobby", index=True)
     first_turn: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    name: Mapped[str | None] = mapped_column(String(120), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

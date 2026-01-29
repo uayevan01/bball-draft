@@ -52,6 +52,7 @@ async def _get_or_create_user(
     email: str | None,
     username: str | None,
     full_name: str | None,
+    avatar_url: str | None,
 ) -> User:
     existing = (await db.execute(select(User).where(User.clerk_id == clerk_id))).scalar_one_or_none()
     if existing:
@@ -66,12 +67,15 @@ async def _get_or_create_user(
         if full_name and existing.full_name != full_name:
             existing.full_name = full_name
             changed = True
+        if avatar_url and existing.avatar_url != avatar_url:
+            existing.avatar_url = avatar_url
+            changed = True
         if changed:
             await db.commit()
             await db.refresh(existing)
         return existing
 
-    user = User(clerk_id=clerk_id, email=email, username=username, full_name=full_name)
+    user = User(clerk_id=clerk_id, email=email, username=username, full_name=full_name, avatar_url=avatar_url)
     db.add(user)
     await db.commit()
     await db.refresh(user)
@@ -87,7 +91,7 @@ async def get_current_user(
     """
     is_dev = settings.app_env.lower() == "dev"
 
-    def _claims_to_identity(payload: dict[str, Any]) -> tuple[str | None, str | None, str | None]:
+    def _claims_to_identity(payload: dict[str, Any]) -> tuple[str | None, str | None, str | None, str | None]:
         clerk_id = payload.get("sub")
         email = payload.get("email") or payload.get("primary_email") or None
         full_name = payload.get("name") or payload.get("full_name") or None
@@ -99,7 +103,8 @@ async def get_current_user(
             elif given:
                 full_name = str(given)
         username = payload.get("username") or payload.get("preferred_username") or None
-        return clerk_id, email, (username or full_name)
+        avatar_url = payload.get("picture") or payload.get("image_url") or payload.get("avatar_url") or None
+        return clerk_id, email, (username or full_name), avatar_url
 
     async def _dev_user_from_token(token: str) -> User:
         """
@@ -109,24 +114,34 @@ async def get_current_user(
         try:
             payload = jwt.decode(token, options={"verify_signature": False, "verify_aud": False, "verify_iss": False})
         except jwt.PyJWTError:
-            return await _get_or_create_user(db, clerk_id="dev_user", email=None, username="dev_user", full_name="Dev User")
-        clerk_id, email, username = _claims_to_identity(payload)
+            return await _get_or_create_user(
+                db, clerk_id="dev_user", email=None, username="dev_user", full_name="Dev User", avatar_url=None
+            )
+        clerk_id, email, username, avatar_url = _claims_to_identity(payload)
         if not clerk_id:
-            return await _get_or_create_user(db, clerk_id="dev_user", email=None, username="dev_user", full_name="Dev User")
+            return await _get_or_create_user(
+                db, clerk_id="dev_user", email=None, username="dev_user", full_name="Dev User", avatar_url=None
+            )
         # In dev, if Clerk doesn't provide username, use a stable-ish fallback derived from email/full_name.
         full_name = payload.get("name") or payload.get("full_name") or None
-        return await _get_or_create_user(db, clerk_id=clerk_id, email=email, username=username, full_name=full_name)
+        return await _get_or_create_user(
+            db, clerk_id=clerk_id, email=email, username=username, full_name=full_name, avatar_url=avatar_url
+        )
 
     # If Clerk JWKS isn't configured locally, still allow per-user identity in dev by decoding the token unverified.
     if is_dev and settings.auth_optional_in_dev and not settings.clerk_jwks_url:
         if authorization and authorization.lower().startswith("bearer "):
             token = authorization.split(" ", 1)[1].strip()
             return await _dev_user_from_token(token)
-        return await _get_or_create_user(db, clerk_id="dev_user", email=None, username="dev_user", full_name="Dev User")
+        return await _get_or_create_user(
+            db, clerk_id="dev_user", email=None, username="dev_user", full_name="Dev User", avatar_url=None
+        )
 
     if not authorization or not authorization.lower().startswith("bearer "):
         if is_dev and settings.auth_optional_in_dev:
-            return await _get_or_create_user(db, clerk_id="dev_user", email=None, username="dev_user", full_name="Dev User")
+            return await _get_or_create_user(
+                db, clerk_id="dev_user", email=None, username="dev_user", full_name="Dev User", avatar_url=None
+            )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing bearer token")
 
     token = authorization.split(" ", 1)[1].strip()
@@ -183,6 +198,9 @@ async def get_current_user(
             full_name = str(given)
 
     username = payload.get("username") or payload.get("preferred_username") or None
-    return await _get_or_create_user(db, clerk_id=clerk_id, email=email, username=username, full_name=full_name)
+    avatar_url = payload.get("picture") or payload.get("image_url") or payload.get("avatar_url") or None
+    return await _get_or_create_user(
+        db, clerk_id=clerk_id, email=email, username=username, full_name=full_name, avatar_url=avatar_url
+    )
 
 

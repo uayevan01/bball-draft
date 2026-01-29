@@ -118,6 +118,10 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
   const rollStageDecadeLabel = stateSocket.rollStageDecadeLabel;
   const rollConstraint = stateSocket.rollConstraint;
   const onlyEligible = stateSocket.onlyEligible;
+  const draftName = stateSocket.draftName ?? draft?.name ?? null;
+
+  const [draftNameEditing, setDraftNameEditing] = useState(false);
+  const [draftNameInput, setDraftNameInput] = useState("");
 
   const isSpinning = rollStage === "spinning_decade" || rollStage === "spinning_team";
   const needsConstraint = Boolean(rules?.spin_fields?.includes("year") || rules?.spin_fields?.includes("team"));
@@ -314,6 +318,11 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
     const u = side === "host" ? draft?.host : draft?.guest;
     if (!u) return side === "host" ? "Host" : "Guest";
     return u.username || u.email || u.clerk_id || u.id;
+  }
+
+  function avatarUrl(side: "host" | "guest"): string | null {
+    const u = side === "host" ? draft?.host : draft?.guest;
+    return (u?.avatar_url ?? null) || null;
   }
 
   const hostPicks = picks.filter((p) => p.role === "host");
@@ -516,6 +525,53 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
     <div className="mt-6 grid gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-black/10 bg-white px-4 py-3 dark:border-white/10 dark:bg-zinc-900/50">
         <div className="flex flex-wrap items-center gap-3 text-sm">
+          <div className="flex items-center gap-2">
+            {draftNameEditing ? (
+              <>
+                <input
+                  value={draftNameInput}
+                  onChange={(e) => setDraftNameInput(e.target.value)}
+                  className="h-9 w-[220px] rounded-full border border-black/10 bg-white px-3 text-sm font-semibold text-zinc-950 dark:border-white/10 dark:bg-zinc-900 dark:text-white"
+                  placeholder="Draft name…"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = draftNameInput.trim();
+                    if (!next) return;
+                    host.setDraftNameValue(next);
+                    setDraftNameEditing(false);
+                  }}
+                  className="h-9 rounded-full bg-zinc-950 px-3 text-sm font-semibold text-white hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
+                >
+                  Save
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDraftNameEditing(false)}
+                  className="h-9 rounded-full border border-black/10 bg-white px-3 text-sm font-semibold text-zinc-950 hover:bg-black/5 dark:border-white/10 dark:bg-zinc-900 dark:text-white dark:hover:bg-zinc-800"
+                >
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="text-sm font-semibold text-zinc-950 dark:text-white">{draftName || "Draft"}</div>
+                {(isLocal || effectiveRole === "host") ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDraftNameInput(draftName || "");
+                      setDraftNameEditing(true);
+                    }}
+                    className="text-xs text-zinc-600 hover:underline dark:text-zinc-300"
+                  >
+                    Rename
+                  </button>
+                ) : null}
+              </>
+            )}
+          </div>
           <div className="font-mono text-xs text-zinc-500 dark:text-zinc-400">{`/draft/${draft?.public_id ?? draftRef}`}</div>
           <div className="text-zinc-600 dark:text-zinc-300">
             Connected: {connectedRoles.length ? connectedRoles.join(", ") : "(none)"}
@@ -682,7 +738,14 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
         <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-900/50">
           <div className="flex items-baseline justify-between gap-3">
             <div className="flex items-center gap-2 text-sm font-semibold">
-              <span>{displayName("host")}</span>
+              <Image
+                src={avatarUrl("host") || "/avatar-placeholder.svg"}
+                alt={displayName("host")}
+                width={28}
+                height={28}
+                className="h-7 w-7 flex-none rounded-full object-cover"
+              />
+              <span className="truncate">{displayName("host")}</span>
               {isYourTurnForSide("host") ? (
                 <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-[11px] font-semibold text-white">
                   YOUR TURN
@@ -839,7 +902,14 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
         <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-900/50">
           <div className="flex items-baseline justify-between gap-3">
             <div className="flex items-center gap-2 text-sm font-semibold">
-              <span>{displayName("guest")}</span>
+              <Image
+                src={avatarUrl("guest") || "/avatar-placeholder.svg"}
+                alt={displayName("guest")}
+                width={28}
+                height={28}
+                className="h-7 w-7 flex-none rounded-full object-cover"
+              />
+              <span className="truncate">{displayName("guest")}</span>
               {isYourTurnForSide("guest") ? (
                 <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-[11px] font-semibold text-white">
                   YOUR TURN

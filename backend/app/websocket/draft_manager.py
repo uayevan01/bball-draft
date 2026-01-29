@@ -28,6 +28,8 @@ class DraftSession:
     current_constraint: dict | None = None
     # lobby setting: whether search should only show eligible players (host-controlled)
     only_eligible: bool | None = None
+    # draft display name (host-controlled)
+    draft_name: str | None = None
 
     def other(self, role: Role) -> Role:
         return "guest" if role == "host" else "host"

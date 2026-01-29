@@ -18,6 +18,7 @@ class User(Base):
 
     # Name from identity provider (e.g., Google via Clerk). Used for display, not as a unique handle.
     full_name: Mapped[str | None] = mapped_column(String(140), nullable=True)
+    avatar_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     username: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
     email: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)

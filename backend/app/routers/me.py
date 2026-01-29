@@ -45,6 +45,12 @@ async def update_me(
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already taken")
             user.username = desired
 
+    # Optional: sync email + avatar_url from Clerk frontend (JWT often doesn't include these).
+    if payload.email is not None:
+        user.email = payload.email.strip() or None
+    if payload.avatar_url is not None:
+        user.avatar_url = payload.avatar_url.strip() or None
+
     await db.commit()
     await db.refresh(user)
     return user

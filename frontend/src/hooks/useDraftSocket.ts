@@ -10,6 +10,7 @@ type DraftWsMessage =
       started?: boolean;
       first_turn?: "host" | "guest" | null;
       current_turn?: "host" | "guest" | null;
+      draft_name?: string | null;
       picks?: Array<{
         pick_number: number;
         role: "host" | "guest";
@@ -59,6 +60,7 @@ type DraftWsMessage =
     }
   | { type: "roll_error"; draft_id: number; message: string }
   | { type: "only_eligible_updated"; draft_id: number; value: boolean }
+  | { type: "draft_name_updated"; draft_id: number; value: string }
   | { type: "error"; message: string };
 
 export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled: boolean = true) {
@@ -87,6 +89,7 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
     team: { id: number; name: string; abbreviation?: string | null; logo_url?: string | null };
   } | null>(null);
   const [onlyEligible, setOnlyEligible] = useState<boolean>(true);
+  const [draftName, setDraftName] = useState<string | null>(null);
   const [status, setStatus] = useState<"disabled" | "connecting" | "open" | "closed">(
     enabled ? "connecting" : "disabled",
   );
@@ -129,6 +132,8 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
       setRollConstraint(null);
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setOnlyEligible(true);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setDraftName(null);
       setStatus("disabled");
       return;
     }
@@ -164,6 +169,11 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
               }
               if (typeof msg.only_eligible === "boolean") {
                 setOnlyEligible(msg.only_eligible);
+              }
+              if (typeof msg.draft_name === "string") {
+                setDraftName(msg.draft_name);
+              } else if (msg.draft_name === null) {
+                setDraftName(null);
               }
               if (Array.isArray(msg.picks)) {
                 setPicks(
@@ -232,6 +242,8 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
             setLastError(msg.message);
           } else if (msg.type === "only_eligible_updated") {
             setOnlyEligible(msg.value);
+          } else if (msg.type === "draft_name_updated") {
+            setDraftName(msg.value);
           }
         } catch {
           // ignore
@@ -302,6 +314,15 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
     ws.send(JSON.stringify({ type: "set_only_eligible", value }));
   }
 
+  function setDraftNameValue(value: string) {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      setLastError("WebSocket closed");
+      return;
+    }
+    ws.send(JSON.stringify({ type: "set_draft_name", value }));
+  }
+
   return {
     connectedRoles,
     firstTurn,
@@ -318,6 +339,8 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
     rollConstraint,
     onlyEligible,
     setOnlyEligiblePlayers,
+    draftName,
+    setDraftNameValue,
   };
 }
 
