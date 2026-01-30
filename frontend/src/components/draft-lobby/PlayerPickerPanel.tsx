@@ -328,7 +328,7 @@ export function PlayerPickerPanel({
             {errorToShow ? <div className="text-sm text-red-700 dark:text-red-300">{errorToShow}</div> : null}
 
             <div className="grid gap-2">
-              {results.map((p) => {
+              {results.slice(0, 8).map((p) => {
                 const isDrafted = drafted(p.id);
                 return (
                   <button
