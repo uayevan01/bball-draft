@@ -269,11 +269,11 @@ export function PlayerPickerPanel({
                       (constraint.namePart ?? "first") as "first" | "last" | "either",
                     ) ? (
                       <span className="text-emerald-700 dark:text-emerald-300">
-                        Name matches: {(constraint.namePart ?? "first")} starts with {constraint.nameLetter.toUpperCase()}
+                        Name matches: {(constraint.namePart ?? "first")} name starts with {constraint.nameLetter.toUpperCase()}
                       </span>
                     ) : (
                       <span className="text-red-700 dark:text-red-300">
-                        Name must match: {(constraint.namePart ?? "first")} starts with {constraint.nameLetter.toUpperCase()}
+                        Name must match: {(constraint.namePart ?? "first")} name starts with {constraint.nameLetter.toUpperCase()}
                       </span>
                     )}
                   </div>

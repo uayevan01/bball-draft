@@ -183,7 +183,7 @@ export function MainInfoCard({
                 <div className="text-base font-semibold text-zinc-700 dark:text-zinc-200">{constraint.yearLabel ?? "Any year"}</div>
                 {constraint.nameLetter ? (
                   <div className="text-sm font-semibold text-zinc-700 dark:text-zinc-200">
-                    {(constraint.namePart ?? "first")} starts with{" "}
+                    {(constraint.namePart ?? "first")} name starts with{" "}
                     <span className="font-bold text-zinc-950 dark:text-white">{constraint.nameLetter.toUpperCase()}</span>
                   </div>
                 ) : null}
