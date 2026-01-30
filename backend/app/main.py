@@ -20,12 +20,21 @@ def create_app() -> FastAPI:
     allow_origins = [o.strip() for o in settings.cors_allow_origins.split(",") if o.strip()]
     # In local dev, Next may run on 3000, 3001, etc. Allow any localhost port to prevent
     # opaque "Failed to fetch" errors caused by CORS.
-    allow_origin_regex = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$" if settings.app_env.lower() == "dev" else None
+    app_env = settings.app_env.lower()
+    allow_origin_regex = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$" if app_env == "dev" else None
+    # Production safety-net: if you forgot to set CORS_ALLOW_ORIGINS on Fly/Vercel,
+    # allow Vercel preview/prod domains so the app isn't bricked by CORS.
+    #
+    # You can (and should) still set CORS_ALLOW_ORIGINS to your exact prod domain(s) for stricter control.
+    if app_env != "dev" and not allow_origins and not allow_origin_regex:
+        allow_origin_regex = r"^https://.*\.vercel\.app$"
     app.add_middleware(
         CORSMiddleware,
         allow_origins=allow_origins,
         allow_origin_regex=allow_origin_regex,
-        allow_credentials=True,
+        # Frontend uses Authorization bearer tokens, not cookies, so credentials aren't needed.
+        # Keeping this false avoids the common "CORS + credentials" footguns.
+        allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
     )

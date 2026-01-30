@@ -16,7 +16,12 @@ class Settings(BaseSettings):
         validation_alias="DATABASE_URL",
     )
 
-    cors_allow_origins: str = Field(default="http://localhost:3000", validation_alias="CORS_ALLOW_ORIGINS")
+    # Comma-separated list of allowed browser origins, e.g.
+    # "http://localhost:3000,https://bballdraft.vercel.app"
+    #
+    # In dev we also allow any localhost port via allow_origin_regex (see app/main.py),
+    # so leaving this empty locally is fine.
+    cors_allow_origins: str = Field(default="", validation_alias="CORS_ALLOW_ORIGINS")
 
     # Clerk
     clerk_issuer: str | None = Field(default=None, validation_alias="CLERK_ISSUER")  # e.g. https://clerk.yourdomain.com

@@ -13,6 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_db
 from app.models import User
+import logging
+
+
+logger = logging.getLogger("uvicorn.error")
 
 
 @dataclass
@@ -33,12 +37,23 @@ async def _get_jwks() -> dict[str, Any]:
         return _jwks_cache.jwks or {}
 
     if not settings.clerk_jwks_url:
-        raise RuntimeError("CLERK_JWKS_URL is not configured.")
+        # This should never be a raw 500; raise a clean error that surfaces in API responses/logs.
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Server auth not configured")
 
-    async with httpx.AsyncClient(headers={"User-Agent": "nba-draft-app/1.0"}) as client:
-        resp = await client.get(settings.clerk_jwks_url, timeout=20)
-        resp.raise_for_status()
-        jwks = resp.json()
+    try:
+        async with httpx.AsyncClient(headers={"User-Agent": "nba-draft-app/1.0"}) as client:
+            resp = await client.get(settings.clerk_jwks_url, timeout=20)
+            resp.raise_for_status()
+            jwks = resp.json()
+    except httpx.HTTPError:
+        logger.exception("Failed to fetch Clerk JWKS from %s", settings.clerk_jwks_url)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to fetch Clerk JWKS (check CLERK_JWKS_URL)",
+        )
+    except Exception:
+        logger.exception("Unexpected error fetching Clerk JWKS from %s", settings.clerk_jwks_url)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Auth JWKS fetch failed")
 
     _jwks_cache.jwks = jwks
     _jwks_cache.fetched_at = time.time()
@@ -90,6 +105,13 @@ async def get_current_user(
     Validates Clerk JWT if present. In dev, can fall back to a deterministic dev user.
     """
     is_dev = settings.app_env.lower() == "dev"
+    if not is_dev:
+        # In production we require Clerk to be configured; otherwise every authed endpoint will 500.
+        if not settings.clerk_jwks_url or not settings.clerk_issuer:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Server auth not configured (missing CLERK_JWKS_URL / CLERK_ISSUER)",
+            )
 
     def _claims_to_identity(payload: dict[str, Any]) -> tuple[str | None, str | None, str | None, str | None]:
         clerk_id = payload.get("sub")
