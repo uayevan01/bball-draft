@@ -5,7 +5,7 @@ import asyncio
 from collections.abc import Sequence
 from datetime import datetime, timezone
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 
 from app.database import SessionLocal
@@ -389,6 +389,10 @@ async def upsert_player_team_stints(
     print(f"[player-stints] using DATABASE_URL={settings.database_url}")
 
     async with SessionLocal() as session:
+        # Backfill: for retired players, a NULL stint end_year should never exist
+        # (otherwise UI/eligibility treats them as active forever).
+        # This is safe because only the final stint would have end_year NULL.
+        await backfill_retired_stint_end_years(session)
         abbr_to_team_id = await _team_abbr_map(session)
 
         # Resume by default:
@@ -408,8 +412,13 @@ async def upsert_player_team_stints(
 
         async def _one(player_id: int, bref_id: str) -> list[dict]:
             async with sem:
+                # Determine active vs retired so we don't mark the final stint as "current" for retired players.
+                player_ret = (
+                    await session.execute(select(Player.retirement_year).where(Player.id == player_id))
+                ).scalar_one_or_none()
+                is_active = player_ret is None
                 seasons, headshot_url = await scrape_player_team_seasons(bref_id)
-                stints = seasons_to_stints(bref_id, seasons)
+                stints = seasons_to_stints(bref_id, seasons, is_active=is_active)
                 out: list[dict] = []
                 for s in stints:
                     abbr = ABBR_ALIASES.get(s.team_abbreviation.upper(), s.team_abbreviation.upper())
@@ -530,6 +539,24 @@ async def upsert_player_team_stints(
         return total_inserted_stints
 
 
+async def backfill_retired_stint_end_years(session) -> int:
+    res = await session.execute(
+        text(
+            """
+            UPDATE player_team_stints pts
+            SET end_year = p.retirement_year
+            FROM players p
+            WHERE pts.player_id = p.id
+              AND pts.end_year IS NULL
+              AND p.retirement_year IS NOT NULL
+            """
+        )
+    )
+    await session.commit()
+    # rowcount can be -1 depending on driver; still useful when available.
+    return int(res.rowcount or 0)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Seed Teams/Players from Basketball Reference.")
     parser.add_argument("--teams", action="store_true", help="Scrape and upsert Teams")
@@ -537,6 +564,11 @@ def main() -> None:
     parser.add_argument("--drafts", nargs=2, type=int, metavar=("START_YEAR", "END_YEAR"), help="Scrape drafts and upsert Players")
     parser.add_argument("--all-players", action="store_true", help="Scrape ALL players A–Z (drafted + undrafted) and upsert by bref_id")
     parser.add_argument("--player-stints", action="store_true", help="Scrape player pages and populate player_team_stints")
+    parser.add_argument(
+        "--backfill-retired-stint-ends",
+        action="store_true",
+        help="Only backfill player_team_stints.end_year for retired players (no web scraping).",
+    )
     parser.add_argument("--concurrency", type=int, default=4, help="Concurrency for web scraping (default: 4)")
     parser.add_argument("--limit", type=int, default=None, help="Optional limit (for testing) for certain seed modes")
     parser.add_argument("--bref-id", type=str, default=None, help="Only process one player by bref_id (e.g. jamesle01)")
@@ -545,6 +577,11 @@ def main() -> None:
     args = parser.parse_args()
 
     async def _run() -> None:
+        if args.backfill_retired_stint_ends:
+            async with SessionLocal() as session:
+                n = await backfill_retired_stint_end_years(session)
+            print(f"Backfilled retired stint end_years: {n}")
+            return
         if args.teams:
             n = await upsert_teams(with_logos=bool(args.team_logos))
             print(f"Upserted teams: {n}")

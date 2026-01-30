@@ -30,6 +30,8 @@ class DraftSession:
     only_eligible: bool | None = None
     # draft display name (host-controlled)
     draft_name: str | None = None
+    # ephemeral "selected but not confirmed" preview (broadcast to both clients)
+    pending_selection: dict[Role, dict | None] = field(default_factory=dict)
 
     def other(self, role: Role) -> Role:
         return "guest" if role == "host" else "host"

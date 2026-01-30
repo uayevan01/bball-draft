@@ -18,6 +18,7 @@ export function MainInfoCard({
   rollStage,
   spinPreviewDecade,
   spinPreviewTeam,
+  spinPreviewLetter,
   rollStageDecadeLabel,
   constraint,
 }: {
@@ -31,9 +32,10 @@ export function MainInfoCard({
   onRoll: () => void;
   showConstraint: boolean;
   isSpinning: boolean;
-  rollStage: null | "idle" | "spinning_decade" | "spinning_team";
+  rollStage: null | "idle" | "spinning_decade" | "spinning_team" | "spinning_letter";
   spinPreviewDecade: string | null;
   spinPreviewTeam: SpinPreviewTeam | null;
+  spinPreviewLetter: string | null;
   rollStageDecadeLabel: string | null;
   constraint: EligibilityConstraint | null;
 }) {
@@ -124,10 +126,18 @@ export function MainInfoCard({
                   <div className="h-16 w-16 rounded-xl border border-black/10 bg-white/60 dark:border-white/10 dark:bg-zinc-900/60" />
                 )}
                 <div className="text-xs font-semibold tracking-wide text-zinc-600 dark:text-zinc-300">
-                  {rollStage === "spinning_decade" ? "SPINNING DECADE" : "SPINNING TEAM"}
+                  {rollStage === "spinning_decade"
+                    ? "SPINNING YEAR"
+                    : rollStage === "spinning_team"
+                      ? "SPINNING TEAM"
+                      : "SPINNING LETTER"}
                 </div>
                 <div className="text-lg font-semibold text-zinc-950 dark:text-white">
-                  {rollStage === "spinning_decade" ? spinPreviewDecade ?? "—" : spinPreviewTeam?.name ?? "—"}
+                  {rollStage === "spinning_decade"
+                    ? spinPreviewDecade ?? "—"
+                    : rollStage === "spinning_team"
+                      ? spinPreviewTeam?.name ?? "—"
+                      : spinPreviewLetter ?? "—"}
                 </div>
                 <div className="text-sm text-zinc-700 dark:text-zinc-200">
                   {rollStage === "spinning_team" ? `(${rollStageDecadeLabel ?? "—"})` : " "}
@@ -156,7 +166,7 @@ export function MainInfoCard({
                             />
                           )}
                           {showNames ? (
-                            <div className="max-w-[10rem] truncate text-xs font-semibold text-zinc-800 dark:text-zinc-200">
+                            <div className="max-w-40 truncate text-xs font-semibold text-zinc-800 dark:text-zinc-200">
                               {seg.team.name}
                             </div>
                           ) : null}
@@ -171,6 +181,12 @@ export function MainInfoCard({
                   ))}
                 </div>
                 <div className="text-base font-semibold text-zinc-700 dark:text-zinc-200">{constraint.yearLabel ?? "Any year"}</div>
+                {constraint.nameLetter ? (
+                  <div className="text-sm font-semibold text-zinc-700 dark:text-zinc-200">
+                    {(constraint.namePart ?? "first")} starts with{" "}
+                    <span className="font-bold text-zinc-950 dark:text-white">{constraint.nameLetter.toUpperCase()}</span>
+                  </div>
+                ) : null}
               </div>
             ) : (
               <div className="text-sm text-zinc-600 dark:text-zinc-300">

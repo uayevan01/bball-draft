@@ -2,6 +2,22 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
+type TeamLiteWs = {
+  id: number;
+  name: string;
+  abbreviation?: string | null;
+  logo_url?: string | null;
+  previous_team_id?: number | null;
+  founded_year?: number | null;
+  dissolved_year?: number | null;
+};
+
+type ConstraintTeamSegmentWs = {
+  team: TeamLiteWs;
+  startYear?: number | null;
+  endYear?: number | null;
+};
+
 type DraftWsMessage =
   | {
       type: "lobby_ready";
@@ -21,10 +37,16 @@ type DraftWsMessage =
         constraint_year?: string | null;
       }>;
       constraint?: {
-        decadeLabel: string;
-        decadeStart: number;
-        decadeEnd: number;
-        team: { id: number; name: string; abbreviation?: string | null; logo_url?: string | null };
+        teams: ConstraintTeamSegmentWs[];
+        yearLabel?: string | null;
+        yearStart?: number | null;
+        yearEnd?: number | null;
+        nameLetter?: string | null;
+        namePart?: "first" | "last" | "either" | null;
+      } | null;
+      pending_selection?: {
+        host?: { id: number; name: string; image_url?: string | null } | null;
+        guest?: { id: number; name: string; image_url?: string | null } | null;
       } | null;
       only_eligible?: boolean | null;
     }
@@ -46,21 +68,31 @@ type DraftWsMessage =
       type: "roll_started";
       draft_id: number;
       by_role: "host" | "guest";
-      stage: "decade" | "team";
-      decade_label?: string;
+      stage: "year" | "team" | "letter";
+      year_label?: string;
     }
   | {
       type: "roll_result";
       draft_id: number;
       by_role: "host" | "guest";
-      decade_label: string;
-      decade_start: number;
-      decade_end: number;
-      team: { id: number; name: string; abbreviation?: string | null; logo_url?: string | null };
+      constraint: {
+        teams: ConstraintTeamSegmentWs[];
+        yearLabel?: string | null;
+        yearStart?: number | null;
+        yearEnd?: number | null;
+        nameLetter?: string | null;
+        namePart?: "first" | "last" | "either" | null;
+      };
     }
   | { type: "roll_error"; draft_id: number; message: string }
   | { type: "only_eligible_updated"; draft_id: number; value: boolean }
   | { type: "draft_name_updated"; draft_id: number; value: string }
+  | {
+      type: "pending_selection_updated";
+      draft_id: number;
+      role: "host" | "guest";
+      player: { id: number; name: string; image_url?: string | null } | null;
+    }
   | { type: "error"; message: string };
 
 export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled: boolean = true) {
@@ -79,15 +111,21 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
     }>
   >([]);
   const [lastError, setLastError] = useState<string | null>(null);
-  const [rollStage, setRollStage] = useState<null | "idle" | "spinning_decade" | "spinning_team">(null);
+  const [rollStage, setRollStage] = useState<null | "idle" | "spinning_decade" | "spinning_team" | "spinning_letter">(null);
   const [rollText, setRollText] = useState<string | null>(null);
   const [rollStageDecadeLabel, setRollStageDecadeLabel] = useState<string | null>(null);
   const [rollConstraint, setRollConstraint] = useState<{
-    decadeLabel: string;
-    decadeStart: number;
-    decadeEnd: number;
-    team: { id: number; name: string; abbreviation?: string | null; logo_url?: string | null };
+    teams: ConstraintTeamSegmentWs[];
+    yearLabel?: string | null;
+    yearStart?: number | null;
+    yearEnd?: number | null;
+    nameLetter?: string | null;
+    namePart?: "first" | "last" | "either" | null;
   } | null>(null);
+  const [pendingSelection, setPendingSelection] = useState<{
+    host: { id: number; name: string; image_url?: string | null } | null;
+    guest: { id: number; name: string; image_url?: string | null } | null;
+  }>({ host: null, guest: null });
   const [onlyEligible, setOnlyEligible] = useState<boolean>(true);
   const [draftName, setDraftName] = useState<string | null>(null);
   const [status, setStatus] = useState<"disabled" | "connecting" | "open" | "closed">(
@@ -131,6 +169,8 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setRollConstraint(null);
       // eslint-disable-next-line react-hooks/set-state-in-effect
+      setPendingSelection({ host: null, guest: null });
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setOnlyEligible(true);
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setDraftName(null);
@@ -166,6 +206,14 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
                 setRollConstraint(msg.constraint);
               } else {
                 setRollConstraint(null);
+              }
+              if (msg.pending_selection && typeof msg.pending_selection === "object") {
+                setPendingSelection({
+                  host: msg.pending_selection.host ?? null,
+                  guest: msg.pending_selection.guest ?? null,
+                });
+              } else {
+                setPendingSelection({ host: null, guest: null });
               }
               if (typeof msg.only_eligible === "boolean") {
                 setOnlyEligible(msg.only_eligible);
@@ -215,26 +263,26 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
             setRollStage(null);
             setRollText(null);
             setRollStageDecadeLabel(null);
+            setPendingSelection((prev) => ({ ...prev, [msg.role]: null }));
           } else if (msg.type === "roll_started") {
-            if (msg.stage === "decade") {
+            if (msg.stage === "year") {
               setRollStage("spinning_decade");
-              setRollText("Spinning decade…");
+              setRollText("Spinning year…");
               setRollStageDecadeLabel(null);
-            } else {
+            } else if (msg.stage === "team") {
               setRollStage("spinning_team");
-              setRollText(`Spinning team… (${msg.decade_label ?? ""})`);
-              setRollStageDecadeLabel(msg.decade_label ?? null);
+              setRollText(`Spinning team… (${msg.year_label ?? ""})`);
+              setRollStageDecadeLabel(msg.year_label ?? null);
+            } else {
+              setRollStage("spinning_letter");
+              setRollText("Spinning letter…");
+              setRollStageDecadeLabel(null);
             }
           } else if (msg.type === "roll_result") {
             setRollStage("idle");
             setRollText(null);
             setRollStageDecadeLabel(null);
-            setRollConstraint({
-              decadeLabel: msg.decade_label,
-              decadeStart: msg.decade_start,
-              decadeEnd: msg.decade_end,
-              team: msg.team,
-            });
+            setRollConstraint(msg.constraint);
           } else if (msg.type === "roll_error") {
             setRollStage("idle");
             setRollText(null);
@@ -244,6 +292,8 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
             setOnlyEligible(msg.value);
           } else if (msg.type === "draft_name_updated") {
             setDraftName(msg.value);
+          } else if (msg.type === "pending_selection_updated") {
+            setPendingSelection((prev) => ({ ...prev, [msg.role]: msg.player ?? null }));
           }
         } catch {
           // ignore
@@ -323,6 +373,14 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
     ws.send(JSON.stringify({ type: "set_draft_name", value }));
   }
 
+  function selectPlayerPreview(playerId: number | null) {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      return;
+    }
+    ws.send(JSON.stringify({ type: "select_player", player_id: playerId }));
+  }
+
   return {
     connectedRoles,
     firstTurn,
@@ -337,10 +395,12 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
     rollText,
     rollStageDecadeLabel,
     rollConstraint,
+    pendingSelection,
     onlyEligible,
     setOnlyEligiblePlayers,
     draftName,
     setDraftNameValue,
+    selectPlayerPreview,
   };
 }
 

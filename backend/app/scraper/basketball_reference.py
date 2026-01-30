@@ -486,14 +486,14 @@ async def scrape_player_team_seasons(bref_id: str) -> tuple[dict[int, str], str 
     return seasons, headshot_url
 
 
-def seasons_to_stints(bref_id: str, seasons: dict[int, str]) -> list[BRefPlayerStintRow]:
+def seasons_to_stints(bref_id: str, seasons: dict[int, str], *, is_active: bool) -> list[BRefPlayerStintRow]:
     """
     Convert season_start_year->team into contiguous stints.
 
     end_year follows your examples:
     - start_year = first season start year
     - end_year = year the stint ended (last_season_start + 1)
-    - current stint => end_year None
+    - current stint => end_year None (only if player is active)
     """
     if not seasons:
         return []
@@ -506,7 +506,7 @@ def seasons_to_stints(bref_id: str, seasons: dict[int, str]) -> list[BRefPlayerS
     prev_year = years[0]
 
     def _close(team: str, start: int, last_start_year: int, is_last: bool) -> None:
-        end_year = None if is_last else (last_start_year + 1)
+        end_year = None if (is_last and is_active) else (last_start_year + 1)
         stints.append(BRefPlayerStintRow(bref_id=bref_id, team_abbreviation=team, start_year=start, end_year=end_year))
 
     for y in years[1:]:
@@ -523,7 +523,7 @@ def seasons_to_stints(bref_id: str, seasons: dict[int, str]) -> list[BRefPlayerS
         cur_start = y
         prev_year = y
 
-    # close last stint as current
+    # close last stint as current only if active; otherwise close with end_year
     _close(cur_team, cur_start, prev_year, True)
     return stints
 

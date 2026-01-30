@@ -18,6 +18,9 @@ export function PlayerPickerPanel({
   showOnlyEligibleToggle,
   onOnlyEligibleChange,
   constraint,
+  pendingSelection,
+  myRole,
+  onPreviewPlayer,
   drafted,
   canSearch,
   searchError,
@@ -32,6 +35,12 @@ export function PlayerPickerPanel({
   showOnlyEligibleToggle: boolean;
   onOnlyEligibleChange: (v: boolean) => void;
   constraint: EligibilityConstraint | null;
+  pendingSelection: {
+    host: { id: number; name: string; image_url?: string | null } | null;
+    guest: { id: number; name: string; image_url?: string | null } | null;
+  };
+  myRole: "host" | "guest";
+  onPreviewPlayer: (playerId: number | null) => void;
   drafted: (playerId: number) => boolean;
   canSearch: boolean;
   searchError: string | null;
@@ -66,6 +75,10 @@ export function PlayerPickerPanel({
             params.set("stint_start_year", String(constraint.yearStart));
             params.set("stint_end_year", String(constraint.yearEnd));
           }
+          if (constraint.nameLetter) {
+            params.set("name_letters", String(constraint.nameLetter));
+            params.set("name_part", String(constraint.namePart ?? "first"));
+          }
         }
         const token = await getToken().catch(() => null);
         const data = await backendGet<PlayerSearchResult[]>(`/players?${params.toString()}`, token);
@@ -83,6 +96,20 @@ export function PlayerPickerPanel({
 
   const placeholder = canSearch ? "Search player name…" : constraint ? "Search player name…" : "Waiting for constraint…";
   const errorToShow = searchErrorLocal || searchError;
+
+  const otherRole = myRole === "host" ? "guest" : "host";
+  const otherPending = pendingSelection?.[otherRole] ?? null;
+
+  function matchesNameLetter(name: string, letter: string, part: "first" | "last" | "either") {
+    const L = letter.trim().toUpperCase();
+    if (!/^[A-Z]$/.test(L)) return true;
+    const words = name.trim().split(/\s+/);
+    const first = (words[0] ?? "").slice(0, 1).toUpperCase();
+    const last = (words[1] ?? "").slice(0, 1).toUpperCase();
+    if (part === "last") return last === L;
+    if (part === "either") return first === L || last === L;
+    return first === L;
+  }
 
   // Eligibility check for "only eligible" OFF (we allow searching all players but gate confirm).
   useEffect(() => {
@@ -147,6 +174,10 @@ export function PlayerPickerPanel({
     if (isSpinning) return false;
     if (drafted(selected.id)) return false;
     if (!constraint) return false;
+    if (constraint.nameLetter) {
+      const part = (constraint.namePart ?? "first") as "first" | "last" | "either";
+      if (!matchesNameLetter(selected.name, constraint.nameLetter, part)) return false;
+    }
     if (!onlyEligible && constraint) {
       return selectedEligibility === true;
     }
@@ -179,7 +210,10 @@ export function PlayerPickerPanel({
                   <div className="flex flex-wrap justify-end gap-2">
                     <button
                       type="button"
-                      onClick={() => setSelected(null)}
+                      onClick={() => {
+                        setSelected(null);
+                        onPreviewPlayer(null);
+                      }}
                       className="h-10 whitespace-nowrap rounded-full border border-black/10 bg-white px-3 text-sm font-semibold text-zinc-950 hover:bg-black/5 dark:border-white/10 dark:bg-zinc-900 dark:text-white dark:hover:bg-zinc-800"
                     >
                       Clear
@@ -190,6 +224,7 @@ export function PlayerPickerPanel({
                       onClick={() => {
                         if (!selected) return;
                         onPickPlayer(selected.id);
+                        onPreviewPlayer(null);
                         setSelected(null);
                       }}
                       className="h-10 whitespace-nowrap rounded-full bg-zinc-950 px-4 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-60 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
@@ -226,9 +261,48 @@ export function PlayerPickerPanel({
                   </div>
                 ) : null}
 
+                {constraint?.nameLetter && selected ? (
+                  <div className="mt-2 text-xs">
+                    {matchesNameLetter(
+                      selected.name,
+                      constraint.nameLetter,
+                      (constraint.namePart ?? "first") as "first" | "last" | "either",
+                    ) ? (
+                      <span className="text-emerald-700 dark:text-emerald-300">
+                        Name matches: {(constraint.namePart ?? "first")} starts with {constraint.nameLetter.toUpperCase()}
+                      </span>
+                    ) : (
+                      <span className="text-red-700 dark:text-red-300">
+                        Name must match: {(constraint.namePart ?? "first")} starts with {constraint.nameLetter.toUpperCase()}
+                      </span>
+                    )}
+                  </div>
+                ) : null}
+
                 {onlyEligible && selected && drafted(selected.id) ? (
                   <div className="mt-2 text-xs text-red-700 dark:text-red-300">Can’t select this player — already drafted.</div>
                 ) : null}
+              </div>
+            ) : null}
+
+            {!selected && otherPending ? (
+              <div className="rounded-xl border border-black/10 bg-black/5 p-3 dark:border-white/10 dark:bg-white/10">
+                <div className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
+                  {otherRole === "host" ? "Host" : "Guest"} is selecting…
+                </div>
+                <div className="mt-2 flex min-w-0 items-center gap-3">
+                  <Image
+                    src={otherPending.image_url ?? "/avatar-placeholder.svg"}
+                    alt={otherPending.name}
+                    width={40}
+                    height={40}
+                    className="h-10 w-10 flex-none rounded-lg object-contain"
+                  />
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold">{otherPending.name}</div>
+                    <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">Preview only (not confirmed)</div>
+                  </div>
+                </div>
               </div>
             ) : null}
 
@@ -261,7 +335,10 @@ export function PlayerPickerPanel({
                     key={p.id}
                     type="button"
                     disabled={!canSearch || isDrafted}
-                    onClick={() => setSelected(p)}
+                    onClick={() => {
+                      setSelected(p);
+                      onPreviewPlayer(p.id);
+                    }}
                     className="flex items-center justify-between rounded-xl border border-black/10 px-3 py-2 text-left text-sm hover:bg-black/5 disabled:opacity-60 dark:border-white/10 dark:hover:bg-white/10"
                   >
                     <span className="flex min-w-0 items-center gap-3">

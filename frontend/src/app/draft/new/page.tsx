@@ -1,18 +1,35 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useAuth } from "@clerk/nextjs";
+
 import { AppShell } from "@/components/AppShell";
 import { DraftCreateForm } from "@/components/DraftCreateForm";
-import { apiGet } from "@/lib/api";
+import { backendGet } from "@/lib/backendClient";
 import type { DraftType } from "@/lib/types";
 
-export default async function NewDraftPage() {
-  let draftTypes: DraftType[] = [];
-  let error: string | null = null;
+export default function NewDraftPage() {
+  const { getToken } = useAuth();
+  const [draftTypes, setDraftTypes] = useState<DraftType[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
-  // In dev, the backend can allow missing auth; in prod, Clerk token should be used via client calls.
-  try {
-    draftTypes = await apiGet<DraftType[]>("/draft-types");
-  } catch (e) {
-    error = e instanceof Error ? e.message : "Failed to load draft types.";
-  }
+  useEffect(() => {
+    let cancelled = false;
+    async function run() {
+      setError(null);
+      try {
+        const token = await getToken().catch(() => null);
+        const items = await backendGet<DraftType[]>("/draft-types", token);
+        if (!cancelled) setDraftTypes(items);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load draft types.");
+      }
+    }
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [getToken]);
 
   return (
     <AppShell>

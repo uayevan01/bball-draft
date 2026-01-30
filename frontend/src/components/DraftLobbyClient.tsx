@@ -18,7 +18,6 @@ import type {
   DraftPickWs,
   EligibilityConstraint,
   PlayerDetail,
-  RollConstraint,
   SpinPreviewTeam,
   TeamLite,
 } from "@/components/draft-lobby/types";
@@ -40,6 +39,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
   // Roll/constraint state comes from the websocket so both players see the same spinner + result.
   const [spinPreviewDecade, setSpinPreviewDecade] = useState<string | null>(null);
   const [spinPreviewTeam, setSpinPreviewTeam] = useState<SpinPreviewTeam | null>(null);
+  const [spinPreviewLetter, setSpinPreviewLetter] = useState<string | null>(null);
 
   // Load backend user + draft so we can auto-assign roles for non-local lobbies.
   useEffect(() => {
@@ -122,17 +122,21 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
 
   const rollStage = stateSocket.rollStage;
   const rollStageDecadeLabel = stateSocket.rollStageDecadeLabel;
-  const rollConstraint = stateSocket.rollConstraint as RollConstraint | null;
+  const rollConstraint = stateSocket.rollConstraint as EligibilityConstraint | null;
   const onlyEligible = stateSocket.onlyEligible;
   const draftName = stateSocket.draftName ?? draft?.name ?? null;
+  const pendingSelection = stateSocket.pendingSelection as
+    | { host: { id: number; name: string; image_url?: string | null } | null; guest: { id: number; name: string; image_url?: string | null } | null }
+    | undefined;
 
   const [draftNameEditing, setDraftNameEditing] = useState(false);
   const [draftNameInput, setDraftNameInput] = useState("");
 
-  const isSpinning = rollStage === "spinning_decade" || rollStage === "spinning_team";
+  const isSpinning = rollStage === "spinning_decade" || rollStage === "spinning_team" || rollStage === "spinning_letter";
   const spinsYear = Boolean(rules?.spin_fields?.includes("year"));
   const spinsTeam = Boolean(rules?.spin_fields?.includes("team"));
-  const usesRoll = spinsYear || spinsTeam;
+  const spinsNameLetter = Boolean(rules?.spin_fields?.includes("name_letter"));
+  const usesRoll = spinsYear || spinsTeam || spinsNameLetter;
 
   const staticTeamAbbrs = useMemo(() => {
     const tc = rules?.team_constraint;
@@ -187,22 +191,30 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
     return { label: "Any year" as const, start: null as number | null, end: null as number | null };
   }, [rules]);
 
+  const staticNameLetter = useMemo(() => {
+    const c = rules?.name_letter_constraint;
+    if (!c || c.type !== "specific") return null;
+    const opts = (c.options ?? []).map((x) => String(x).trim().toUpperCase()).filter((x) => /^[A-Z]$/.test(x));
+    if (opts.length !== 1) return null; // fixed single letter only
+    return opts[0];
+  }, [rules]);
+
+  const staticNamePart = useMemo(() => {
+    return (rules?.name_letter_part ?? "first") as "first" | "last" | "either";
+  }, [rules]);
+
   const hasAnyConstraintRule = Boolean(
     usesRoll ||
       (rules?.team_constraint && rules.team_constraint.type !== "any") ||
-      (rules?.year_constraint && rules.year_constraint.type !== "any"),
+      (rules?.year_constraint && rules.year_constraint.type !== "any") ||
+      (rules?.name_letter_constraint && rules.name_letter_constraint.type !== "any"),
   );
 
   const eligibilityConstraint = useMemo<EligibilityConstraint | null>(() => {
     if (!started) return null;
     if (usesRoll) {
       if (!rollConstraint) return null;
-      return {
-        teams: [{ team: rollConstraint.team }],
-        yearLabel: rollConstraint.decadeLabel,
-        yearStart: rollConstraint.decadeStart,
-        yearEnd: rollConstraint.decadeEnd,
-      };
+      return rollConstraint;
     }
     if (staticTeams.length) {
       const segments: ConstraintTeamSegment[] = staticTeams.map((t) => ({ team: t }));
@@ -211,10 +223,12 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
         yearLabel: staticYear?.label ?? "Any year",
         yearStart: staticYear?.start ?? null,
         yearEnd: staticYear?.end ?? null,
+        nameLetter: staticNameLetter,
+        namePart: staticNamePart,
       };
     }
     return null;
-  }, [started, usesRoll, rollConstraint, staticTeams, staticYear]);
+  }, [started, usesRoll, rollConstraint, staticTeams, staticYear, staticNameLetter, staticNamePart]);
 
   const constraintReady = !hasAnyConstraintRule || Boolean(eligibilityConstraint);
   const canSearch = Boolean(started && canPick && !isSpinning && constraintReady);
@@ -250,6 +264,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
     if (!isSpinning) {
       setSpinPreviewDecade(null);
       setSpinPreviewTeam(null);
+      setSpinPreviewLetter(null);
       return;
     }
 
@@ -353,6 +368,16 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
       }
     }
     void startTeamSpin();
+
+    // Letter animation: spin through the allowed letter pool.
+    if (rollStage === "spinning_letter") {
+      const poolRaw =
+        rules?.name_letter_constraint?.type === "specific" && rules.name_letter_constraint.options?.length
+          ? rules.name_letter_constraint.options
+          : Array.from({ length: 26 }, (_, i) => String.fromCharCode(65 + i));
+      const pool = poolRaw.map((x) => String(x).trim().toUpperCase()).filter((x) => /^[A-Z]$/.test(x));
+      scheduleSpin<string | null>(pool.map((x) => x ?? null), (v) => setSpinPreviewLetter(v), 900, 60, cancelledRef);
+    }
 
     return () => {
       cancelled = true;
@@ -502,6 +527,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
           rollStage={rollStage}
           spinPreviewDecade={spinPreviewDecade}
           spinPreviewTeam={spinPreviewTeam}
+          spinPreviewLetter={spinPreviewLetter}
           rollStageDecadeLabel={rollStageDecadeLabel}
           constraint={eligibilityConstraint}
         />
@@ -556,6 +582,9 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
           showOnlyEligibleToggle={hasAnyConstraintRule && (isLocal || effectiveRole === "host")}
           onOnlyEligibleChange={(v) => host.setOnlyEligiblePlayers(v)}
           constraint={eligibilityConstraint}
+          pendingSelection={pendingSelection ?? { host: null, guest: null }}
+          myRole={effectiveRole}
+          onPreviewPlayer={(playerId) => pickSocket.selectPlayerPreview(playerId)}
           drafted={(pid) => draftedIds.has(pid)}
           canSearch={canSearch}
           searchError={null}

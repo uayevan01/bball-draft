@@ -22,7 +22,7 @@ export type RollConstraint = {
   decadeLabel: string;
   decadeStart: number;
   decadeEnd: number;
-  team: TeamLite;
+  teams: ConstraintTeamSegment[];
 };
 
 export type ConstraintTeamSegment = {
@@ -38,6 +38,8 @@ export type EligibilityConstraint = {
   yearLabel?: string | null;
   yearStart?: number | null;
   yearEnd?: number | null;
+  nameLetter?: string | null;
+  namePart?: "first" | "last" | "either" | null;
 };
 
 export type SpinPreviewTeam = {

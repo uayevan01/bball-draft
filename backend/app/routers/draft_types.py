@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models import DraftType, User
-from app.schemas.draft_type import DraftTypeCreate, DraftTypeOut
+from app.schemas.draft_type import DraftTypeCreate, DraftTypeOut, DraftTypeUpdate
 from app.services.auth import get_current_user
 
 router = APIRouter(prefix="/draft-types", tags=["draft-types"])
@@ -21,16 +21,15 @@ async def list_draft_types(
 ) -> list[DraftType]:
     stmt = select(DraftType)
 
-    clauses = []
     if mine:
-        clauses.append(DraftType.created_by_id == user.id)
-    if include_public:
-        clauses.append(DraftType.is_public.is_(True))
-    if clauses:
-        stmt = stmt.where(or_(*clauses))
+        # Only my draft types (public or private).
+        stmt = stmt.where(DraftType.created_by_id == user.id)
     else:
-        # default: show mine + public
-        stmt = stmt.where(or_(DraftType.created_by_id == user.id, DraftType.is_public.is_(True)))
+        # Default: mine + public (so private draft types I created show up).
+        if include_public:
+            stmt = stmt.where(or_(DraftType.created_by_id == user.id, DraftType.is_public.is_(True)))
+        else:
+            stmt = stmt.where(DraftType.created_by_id == user.id)
 
     stmt = stmt.order_by(DraftType.created_at.desc())
     return (await db.execute(stmt)).scalars().all()
@@ -67,6 +66,33 @@ async def get_draft_type(
     # Access control: allow if public or created by user.
     if not dt.is_public and dt.created_by_id != user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed")
+    return dt
+
+
+@router.patch("/{draft_type_id}", response_model=DraftTypeOut)
+async def update_draft_type(
+    draft_type_id: int,
+    payload: DraftTypeUpdate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> DraftType:
+    dt = (await db.execute(select(DraftType).where(DraftType.id == draft_type_id))).scalar_one_or_none()
+    if not dt:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Draft type not found")
+    if dt.created_by_id != user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the creator can edit this draft type")
+
+    if payload.name is not None:
+        dt.name = payload.name.strip()
+    if payload.description is not None:
+        dt.description = payload.description.strip() or None
+    if payload.rules is not None:
+        dt.rules = payload.rules
+    if payload.is_public is not None:
+        dt.is_public = payload.is_public
+
+    await db.commit()
+    await db.refresh(dt)
     return dt
 
 

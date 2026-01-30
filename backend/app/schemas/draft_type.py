@@ -15,6 +15,13 @@ class DraftTypeCreate(ORMBaseModel):
     is_public: bool = False
 
 
+class DraftTypeUpdate(ORMBaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=500)
+    rules: dict | None = None
+    is_public: bool | None = None
+
+
 class DraftTypeOut(ORMBaseModel):
     id: int
     name: str

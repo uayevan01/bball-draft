@@ -24,6 +24,14 @@ async def list_players(
         default=None,
         description="Filter by PlayerTeamStint.team_id (comma-separated list). Example: 14,2,7",
     ),
+    name_letters: str | None = Query(
+        default=None,
+        description="Filter by starting letter(s) of first/last name (comma-separated). Example: K,M",
+    ),
+    name_part: str | None = Query(
+        default="first",
+        description='Which name part to apply name_letters to: "first", "last", or "either".',
+    ),
     stint_start_year: int | None = Query(default=None, description="Filter by stint overlap start year (inclusive)"),
     stint_end_year: int | None = Query(default=None, description="Filter by stint overlap end year (inclusive)"),
     limit: int = Query(default=50, ge=1, le=200),
@@ -76,6 +84,22 @@ async def list_players(
                 func.coalesce(PlayerTeamStint.end_year, current_year) >= start,
             )
         stmt = stmt.where(stint_exists)
+
+    # Name-letter constraint (optional): treat first name as first word, last name as second word.
+    if name_letters:
+        letters = [p.strip().upper() for p in name_letters.split(",") if p.strip()]
+        letters = [x for x in letters if len(x) == 1 and x.isalpha()]
+        if letters:
+            part = (name_part or "first").lower()
+            first_letter = func.upper(func.substr(Player.name, 1, 1))
+            # Postgres split_part(name, ' ', 2) => second word or '' if missing.
+            last_letter = func.upper(func.substr(func.split_part(Player.name, " ", 2), 1, 1))
+            if part == "last":
+                stmt = stmt.where(last_letter.in_(letters))
+            elif part == "either":
+                stmt = stmt.where(or_(first_letter.in_(letters), last_letter.in_(letters)))
+            else:
+                stmt = stmt.where(first_letter.in_(letters))
     # Default ordering: Hall of Fame first, then longest career.
     stmt = (
         stmt.order_by(desc(Player.hall_of_fame), desc(career_len), Player.name)
