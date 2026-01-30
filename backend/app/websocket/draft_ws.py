@@ -11,11 +11,13 @@ from app.websocket.draft_manager import Role, draft_manager
 from app.database import SessionLocal
 from app.models import Draft, DraftPick, DraftType, Player, Team
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.orm import joinedload
 
 router = APIRouter(tags=["ws"])
-logger = logging.getLogger("nba_draft_app.ws")
+# Use uvicorn's logger so WS logs always show up in docker compose logs.
+logger = logging.getLogger("uvicorn.error")
+logger.setLevel(logging.INFO)
 
 _DECADE_LABELS = [
     "1950-1959",
@@ -369,15 +371,17 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
                 )
             elif msg_type == "roll":
                 # Only the current-turn player can roll.
+                roll_err: str | None = None
                 async with session.lock:
                     if not session.started or not session.current_turn:
-                        await draft_manager.send_to(session, role, {"type": "error", "message": "Draft not started"})
-                        continue
-                    if session.current_turn != role:
-                        await draft_manager.send_to(session, role, {"type": "error", "message": "Not your turn"})
-                        continue
+                        roll_err = "Draft not started"
+                    elif session.current_turn != role:
+                        roll_err = "Not your turn"
+                if roll_err:
+                    continue
 
                 # Determine stage order from spin_fields.
+                logger.info("roll begin draft_id=%s role=%s", draft_id, role)
                 async with SessionLocal() as db:
                     draft = await db.get(Draft, draft_id)
                     draft_type = await db.get(DraftType, draft.draft_type_id) if draft and draft.draft_type_id else None
@@ -386,6 +390,7 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
                     spin_year = "year" in spin_fields
                     spin_team = "team" in spin_fields
                     spin_letter = "name_letter" in spin_fields
+                logger.info("roll config draft_id=%s role=%s spin_fields=%s", draft_id, role, spin_fields)
 
                 stages: list[str] = []
                 if spin_year:
@@ -394,6 +399,7 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
                     stages.append("team")
                 if spin_letter:
                     stages.append("letter")
+                logger.info("roll stages draft_id=%s role=%s stages=%s", draft_id, role, stages)
 
                 if not stages:
                     await draft_manager.send_to(session, role, {"type": "error", "message": "No roll required for this draft type"})
@@ -402,6 +408,7 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
                 # Animate each stage (even if a stage is "year" but constraint is Any year, UI will still show it).
                 year_label_for_team: str | None = None
                 for st in stages:
+                    logger.info("roll stage broadcast draft_id=%s role=%s stage=%s", draft_id, role, st)
                     payload: dict = {"type": "roll_started", "draft_id": draft_id, "stage": st, "by_role": role}
                     if st == "team" and year_label_for_team:
                         payload["year_label"] = year_label_for_team
@@ -409,10 +416,19 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
                     await asyncio.sleep(0.9)
 
                 try:
-                    constraint = await _compute_roll_constraint(draft_id)
+                    # If something goes wrong (DB stall, unexpected error), don't brick the lobby.
+                    constraint = await asyncio.wait_for(_compute_roll_constraint(draft_id), timeout=5.0)
                 except RuntimeError as e:
                     await draft_manager.broadcast(session, {"type": "roll_error", "draft_id": draft_id, "message": str(e)})
                     continue
+                except Exception:  # noqa: BLE001
+                    logger.exception("roll compute failed draft_id=%s role=%s", draft_id, role)
+                    await draft_manager.broadcast(
+                        session,
+                        {"type": "roll_error", "draft_id": draft_id, "message": "Roll failed (server error)"},
+                    )
+                    continue
+                logger.info("roll complete draft_id=%s role=%s", draft_id, role)
 
                 # Provide year label for UI during team spin (freeze).
                 year_label_for_team = constraint.get("yearLabel") if isinstance(constraint.get("yearLabel"), str) else None
@@ -567,13 +583,14 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
                     await draft_manager.send_to(session, role, {"type": "error", "message": "player_id must be int or null"})
                     continue
 
+                select_err: str | None = None
                 async with session.lock:
                     if not session.started or not session.current_turn:
-                        await draft_manager.send_to(session, role, {"type": "error", "message": "Draft not started"})
-                        continue
-                    if session.current_turn != role:
-                        await draft_manager.send_to(session, role, {"type": "error", "message": "Not your turn"})
-                        continue
+                        select_err = "Draft not started"
+                    elif session.current_turn != role:
+                        select_err = "Not your turn"
+                if select_err:
+                    continue
 
                 if player_id is None:
                     async with session.lock:
@@ -615,5 +632,8 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
             session,
             {"type": "lobby_update", "draft_id": draft_id, "connected": list(session.conns.keys())},
         )
+    except Exception:  # noqa: BLE001
+        logger.exception("ws crashed draft_id=%s role=%s", draft_id, role)
+        await draft_manager.disconnect(session, role, ws)
 
 
