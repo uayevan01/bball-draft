@@ -234,6 +234,186 @@ async def _compute_roll_constraint(draft_id: int) -> dict:
             "namePart": name_part,
         }
 
+
+async def _load_rules_for_draft(draft_id: int) -> dict:
+    async with SessionLocal() as db:
+        draft = await db.get(Draft, draft_id)
+        if not draft:
+            raise RuntimeError("Draft not found")
+        dt = await db.get(DraftType, draft.draft_type_id) if draft.draft_type_id else None
+        return dt.rules if dt and isinstance(dt.rules, dict) else {}
+
+
+def _stage_order_from_rules(rules: dict) -> list[str]:
+    spin_fields = rules.get("spin_fields") if isinstance(rules.get("spin_fields"), list) else []
+    out: list[str] = []
+    if "year" in spin_fields:
+        out.append("year")
+    if "team" in spin_fields:
+        out.append("team")
+    if "name_letter" in spin_fields:
+        out.append("letter")
+    return out
+
+
+async def _roll_year(rules: dict) -> tuple[str, int | None, int | None]:
+    year_constraint = rules.get("year_constraint") if isinstance(rules.get("year_constraint"), dict) else {}
+    decade_options: list[str] = []
+    if year_constraint.get("type") == "decade" and isinstance(year_constraint.get("options"), list):
+        decade_options = [str(x) for x in year_constraint.get("options") if isinstance(x, str)]
+    if not decade_options:
+        decade_options = list(_DECADE_LABELS)
+    year_label = random.choice(decade_options)
+    parsed = _parse_decade_label(year_label)
+    if not parsed:
+        raise RuntimeError("Invalid decade options in rules")
+    start_year, end_year = parsed
+    return year_label, start_year, end_year
+
+
+async def _roll_team(*, year_start: int | None, year_end: int | None, rules: dict) -> list[dict]:
+    team_constraint = rules.get("team_constraint") if isinstance(rules.get("team_constraint"), dict) else {}
+    tc_type = team_constraint.get("type")
+    tc_options = team_constraint.get("options")
+    async with SessionLocal() as db:
+        if year_start is not None and year_end is not None:
+            team_stmt = select(Team).where(
+                and_(
+                    or_(Team.founded_year.is_(None), Team.founded_year <= year_end),
+                    or_(Team.dissolved_year.is_(None), Team.dissolved_year >= year_start),
+                )
+            )
+        else:
+            team_stmt = select(Team)
+        if tc_type == "conference" and isinstance(tc_options, list) and tc_options:
+            team_stmt = team_stmt.where(Team.conference.in_([str(x) for x in tc_options]))
+        elif tc_type == "division" and isinstance(tc_options, list) and tc_options:
+            team_stmt = team_stmt.where(Team.division.in_([str(x) for x in tc_options]))
+        elif tc_type == "specific" and isinstance(tc_options, list) and tc_options:
+            team_stmt = team_stmt.where(Team.abbreviation.in_([str(x) for x in tc_options]))
+
+        teams = (await db.execute(team_stmt)).scalars().all()
+        if not teams:
+            raise RuntimeError("No teams available for that year")
+
+        by_id: dict[int, Team] = {t.id: t for t in teams}
+
+        def root_id(t: Team) -> int:
+            cur = t
+            seen: set[int] = set()
+            while cur.id not in seen:
+                seen.add(cur.id)
+                prev = cur.previous_team_id
+                if not prev:
+                    break
+                nxt = by_id.get(prev)
+                if not nxt:
+                    return prev
+                cur = nxt
+            return cur.id
+
+        def overlap_years(t: Team) -> tuple[int, int] | None:
+            if year_start is None or year_end is None:
+                return None
+            start = max(year_start, t.founded_year or year_start)
+            end = min(year_end, t.dissolved_year or year_end)
+            if start > end:
+                return None
+            return start, end
+
+        groups: dict[int, list[Team]] = {}
+        for t in teams:
+            groups.setdefault(root_id(t), []).append(t)
+        franchise = random.choice(list(groups.values()))
+
+        segments: list[dict] = []
+        for t in franchise:
+            seg = overlap_years(t)
+            seg_start, seg_end = seg if seg else (None, None)
+            segments.append(
+                {
+                    "team": {
+                        "id": t.id,
+                        "name": t.name,
+                        "abbreviation": t.abbreviation,
+                        "logo_url": t.logo_url,
+                        "previous_team_id": t.previous_team_id,
+                        "founded_year": t.founded_year,
+                        "dissolved_year": t.dissolved_year,
+                    },
+                    "startYear": seg_start,
+                    "endYear": seg_end,
+                }
+            )
+        segments.sort(key=lambda s: (s.get("startYear") or 9999, (s.get("team") or {}).get("name") or ""))
+        return segments
+
+
+async def _roll_letter(
+    *,
+    rules: dict,
+    year_start: int | None,
+    year_end: int | None,
+    team_segments: list[dict],
+) -> tuple[str | None, str]:
+    name_part = rules.get("name_letter_part") if isinstance(rules.get("name_letter_part"), str) else "first"
+    if name_part not in ("first", "last", "either"):
+        name_part = "first"
+
+    name_constraint = rules.get("name_letter_constraint") if isinstance(rules.get("name_letter_constraint"), dict) else {}
+    pool: list[str] = []
+    if name_constraint.get("type") == "specific" and isinstance(name_constraint.get("options"), list):
+        pool = [str(x).strip().upper() for x in name_constraint.get("options") if isinstance(x, str)]
+        pool = [x for x in pool if len(x) == 1 and x.isalpha()]
+    if not pool:
+        pool = [chr(c) for c in range(ord("A"), ord("Z") + 1)]
+
+    min_players = rules.get("name_letter_min_options")
+    try:
+        min_players = int(min_players)
+    except Exception:  # noqa: BLE001
+        min_players = 1
+    min_players = max(1, min_players)
+
+    team_ids: list[int] = []
+    for s in team_segments:
+        if isinstance(s, dict) and isinstance(s.get("team"), dict):
+            tid = s["team"].get("id")
+            if isinstance(tid, int):
+                team_ids.append(tid)
+
+    async with SessionLocal() as db:
+        viable: list[str] = []
+        first_letter_expr = func.upper(func.substr(Player.name, 1, 1))
+        last_letter_expr = func.upper(func.substr(func.split_part(Player.name, " ", 2), 1, 1))
+        for L in pool:
+            if name_part == "last":
+                name_clause = last_letter_expr == L
+            elif name_part == "either":
+                name_clause = or_(first_letter_expr == L, last_letter_expr == L)
+            else:
+                name_clause = first_letter_expr == L
+            stmt_count = select(func.count(Player.id)).where(name_clause)
+            if team_ids:
+                from app.models import PlayerTeamStint  # local import to avoid circular
+
+                stint_exists = exists().where(
+                    PlayerTeamStint.player_id == Player.id,
+                    PlayerTeamStint.team_id.in_(team_ids),
+                )
+                if year_start is not None and year_end is not None:
+                    stint_exists = stint_exists.where(
+                        PlayerTeamStint.start_year <= year_end,
+                        func.coalesce(PlayerTeamStint.end_year, year_end) >= year_start,
+                    )
+                stmt_count = stmt_count.where(stint_exists)
+            cnt = (await db.execute(stmt_count)).scalar_one()
+            if cnt >= min_players:
+                viable.append(L)
+        if not viable:
+            viable = pool
+        return random.choice(viable), name_part
+
 def _parse_draft_ref(draft_ref: str) -> tuple[str, object]:
     try:
         return ("id", int(draft_ref))
@@ -380,65 +560,72 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
                 if roll_err:
                     continue
 
-                # Determine stage order from spin_fields.
-                logger.info("roll begin draft_id=%s role=%s", draft_id, role)
-                async with SessionLocal() as db:
-                    draft = await db.get(Draft, draft_id)
-                    draft_type = await db.get(DraftType, draft.draft_type_id) if draft and draft.draft_type_id else None
-                    rules = draft_type.rules if draft_type and isinstance(draft_type.rules, dict) else {}
-                    spin_fields = rules.get("spin_fields") if isinstance(rules.get("spin_fields"), list) else []
-                    spin_year = "year" in spin_fields
-                    spin_team = "team" in spin_fields
-                    spin_letter = "name_letter" in spin_fields
-                logger.info("roll config draft_id=%s role=%s spin_fields=%s", draft_id, role, spin_fields)
-
-                stages: list[str] = []
-                if spin_year:
-                    stages.append("year")
-                if spin_team:
-                    stages.append("team")
-                if spin_letter:
-                    stages.append("letter")
+                rules = await _load_rules_for_draft(draft_id)
+                stages = _stage_order_from_rules(rules)
                 logger.info("roll stages draft_id=%s role=%s stages=%s", draft_id, role, stages)
 
                 if not stages:
                     await draft_manager.send_to(session, role, {"type": "error", "message": "No roll required for this draft type"})
                     continue
 
-                # Animate each stage (even if a stage is "year" but constraint is Any year, UI will still show it).
-                year_label_for_team: str | None = None
-                for st in stages:
-                    logger.info("roll stage broadcast draft_id=%s role=%s stage=%s", draft_id, role, st)
-                    payload: dict = {"type": "roll_started", "draft_id": draft_id, "stage": st, "by_role": role}
-                    if st == "team" and year_label_for_team:
-                        payload["year_label"] = year_label_for_team
-                    await draft_manager.broadcast(session, payload)
-                    await asyncio.sleep(0.9)
+                # Sequential stages: each stage rolls ONE thing and persists it.
+                year_label: str = "Any year"
+                year_start: int | None = None
+                year_end: int | None = None
+                team_segments: list[dict] = []
+                name_letter: str | None = None
+                name_part: str = rules.get("name_letter_part") if isinstance(rules.get("name_letter_part"), str) else "first"
+                if name_part not in ("first", "last", "either"):
+                    name_part = "first"
 
-                try:
-                    # If something goes wrong (DB stall, unexpected error), don't brick the lobby.
-                    constraint = await asyncio.wait_for(_compute_roll_constraint(draft_id), timeout=5.0)
-                except RuntimeError as e:
-                    await draft_manager.broadcast(session, {"type": "roll_error", "draft_id": draft_id, "message": str(e)})
-                    continue
-                except Exception:  # noqa: BLE001
-                    logger.exception("roll compute failed draft_id=%s role=%s", draft_id, role)
+                def current_constraint() -> dict:
+                    return {
+                        "yearLabel": year_label,
+                        "yearStart": year_start,
+                        "yearEnd": year_end,
+                        "teams": team_segments,
+                        "nameLetter": name_letter,
+                        "namePart": name_part,
+                    }
+
+                for st in stages:
+                    await draft_manager.broadcast(session, {"type": "roll_started", "draft_id": draft_id, "by_role": role, "stage": st})
+                    await asyncio.sleep(0.6)
+
+                    try:
+                        if st == "year":
+                            year_label, year_start, year_end = await _roll_year(rules)
+                        elif st == "team":
+                            team_segments = await _roll_team(year_start=year_start, year_end=year_end, rules=rules)
+                        else:
+                            name_letter, name_part = await _roll_letter(
+                                rules=rules, year_start=year_start, year_end=year_end, team_segments=team_segments
+                            )
+                    except RuntimeError as e:
+                        await draft_manager.broadcast(session, {"type": "roll_error", "draft_id": draft_id, "message": str(e)})
+                        break
+                    except Exception:  # noqa: BLE001
+                        logger.exception("roll stage failed draft_id=%s role=%s stage=%s", draft_id, role, st)
+                        await draft_manager.broadcast(session, {"type": "roll_error", "draft_id": draft_id, "message": "Roll failed (server error)"})
+                        break
+
+                    # Persist + broadcast the partial result so later stages "stick".
+                    async with session.lock:
+                        session.current_constraint = current_constraint()
                     await draft_manager.broadcast(
                         session,
-                        {"type": "roll_error", "draft_id": draft_id, "message": "Roll failed (server error)"},
+                        {"type": "roll_stage_result", "draft_id": draft_id, "by_role": role, "stage": st, "constraint": session.current_constraint},
                     )
-                    continue
-                logger.info("roll complete draft_id=%s role=%s", draft_id, role)
+                    await asyncio.sleep(0.2)
 
-                # Provide year label for UI during team spin (freeze).
-                year_label_for_team = constraint.get("yearLabel") if isinstance(constraint.get("yearLabel"), str) else None
-
-                await draft_manager.broadcast(
-                    session,
-                    {"type": "roll_result", "draft_id": draft_id, "by_role": role, "constraint": constraint},
-                )
+                # Final roll_result = whatever the last persisted constraint is (or None if failed early).
                 async with session.lock:
-                    session.current_constraint = constraint
+                    final_constraint = session.current_constraint
+                if final_constraint:
+                    await draft_manager.broadcast(
+                        session,
+                        {"type": "roll_result", "draft_id": draft_id, "by_role": role, "constraint": final_constraint},
+                    )
             elif msg_type == "set_only_eligible":
                 if role != "host":
                     await draft_manager.send_to(session, role, {"type": "error", "message": "Only host can change this setting"})

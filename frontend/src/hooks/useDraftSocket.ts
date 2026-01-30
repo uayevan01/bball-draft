@@ -72,6 +72,20 @@ type DraftWsMessage =
       year_label?: string;
     }
   | {
+      type: "roll_stage_result";
+      draft_id: number;
+      by_role: "host" | "guest";
+      stage: "year" | "team" | "letter";
+      constraint: {
+        teams: ConstraintTeamSegmentWs[];
+        yearLabel?: string | null;
+        yearStart?: number | null;
+        yearEnd?: number | null;
+        nameLetter?: string | null;
+        namePart?: "first" | "last" | "either" | null;
+      };
+    }
+  | {
       type: "roll_result";
       draft_id: number;
       by_role: "host" | "guest";
@@ -268,15 +282,18 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
             if (msg.stage === "year") {
               setRollStage("spinning_decade");
               setRollText("Spinning year…");
-              setRollStageDecadeLabel(null);
             } else if (msg.stage === "team") {
               setRollStage("spinning_team");
               setRollText(`Spinning team… (${msg.year_label ?? ""})`);
-              setRollStageDecadeLabel(msg.year_label ?? null);
             } else {
               setRollStage("spinning_letter");
               setRollText("Spinning letter…");
-              setRollStageDecadeLabel(null);
+            }
+          } else if (msg.type === "roll_stage_result") {
+            // Persist partial constraint so previous stages "stick" in the UI.
+            setRollConstraint(msg.constraint);
+            if (typeof msg.constraint.yearLabel === "string") {
+              setRollStageDecadeLabel(msg.constraint.yearLabel);
             }
           } else if (msg.type === "roll_result") {
             setRollStage("idle");

@@ -122,6 +122,17 @@ export function MainInfoCard({
                     height={64}
                     className="h-16 w-16 rounded-xl object-contain"
                   />
+                ) : rollStage === "spinning_letter" && constraint?.teams?.length ? (
+                  (() => {
+                    const seg = constraint.teams[constraint.teams.length - 1];
+                    const logo = seg?.team?.logo_url ?? null;
+                    const name = seg?.team?.name ?? "Team";
+                    return logo ? (
+                      <Image src={logo} alt={name} width={64} height={64} className="h-16 w-16 rounded-xl object-contain" />
+                    ) : (
+                      <div className="h-16 w-16 rounded-xl border border-black/10 bg-white/60 dark:border-white/10 dark:bg-zinc-900/60" />
+                    );
+                  })()
                 ) : (
                   <div className="h-16 w-16 rounded-xl border border-black/10 bg-white/60 dark:border-white/10 dark:bg-zinc-900/60" />
                 )}
@@ -140,7 +151,18 @@ export function MainInfoCard({
                       : spinPreviewLetter ?? "—"}
                 </div>
                 <div className="text-sm text-zinc-700 dark:text-zinc-200">
-                  {rollStage === "spinning_team" ? `(${rollStageDecadeLabel ?? "—"})` : " "}
+                  {rollStage === "spinning_team" ? (
+                    `(${rollStageDecadeLabel ?? constraint?.yearLabel ?? "—"})`
+                  ) : rollStage === "spinning_letter" ? (
+                    (() => {
+                      const year = constraint?.yearLabel ?? "—";
+                      const seg = constraint?.teams?.length ? constraint.teams[constraint.teams.length - 1] : null;
+                      const team = seg?.team?.abbreviation ?? seg?.team?.name ?? "—";
+                      return `Year: ${year} • Team: ${team}`;
+                    })()
+                  ) : (
+                    " "
+                  )}
                 </div>
               </div>
             ) : constraint ? (
