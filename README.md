@@ -77,13 +77,3 @@ Open:
 
 - **WebSockets**: the frontend connects to `ws://localhost:8000/ws/draft/<draft_id_or_public_id>?role=host|guest` in dev.
 - **Auth**: the frontend uses Clerk; ensure your local `.env.local` is configured.
-
-## Deployment (high level)
-
-- **Frontend**: Vercel
-  - Set `NEXT_PUBLIC_API_BASE_URL` to your backend’s `/api`
-  - Set `NEXT_PUBLIC_WS_BASE_URL` to your backend’s `wss://...`
-  - Set Clerk env vars
-- **Backend**: any host that supports long-lived WebSockets (Render/Fly/Railway/etc.)
-  - Use a hosted Postgres (Neon works well)
-  - Configure `DATABASE_URL` and CORS (`CORS_ALLOW_ORIGINS` to your Vercel domain)
