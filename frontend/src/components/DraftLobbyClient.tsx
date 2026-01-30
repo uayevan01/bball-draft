@@ -544,10 +544,6 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
 
       {!started ? (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-black/10 bg-white px-4 py-3 text-sm dark:border-white/10 dark:bg-zinc-900/50">
-          <label className="flex items-center gap-2">
-            <input type="checkbox" checked={isLocal} onChange={(e) => setIsLocal(e.target.checked)} />
-            Local 2-player mode (host + guest on this device)
-          </label>
           <div className="text-zinc-600 dark:text-zinc-300">
             You are: <span className="font-semibold text-zinc-950 dark:text-white">{effectiveRole}</span>
             {!isLocal ? <span className="ml-2 text-xs text-zinc-500 dark:text-zinc-400">(auto)</span> : null}
