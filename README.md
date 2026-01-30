@@ -1,4 +1,4 @@
-# NBA Draft App
+# BBall Draft
 
 ## Local development
 

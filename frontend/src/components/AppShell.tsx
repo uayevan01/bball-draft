@@ -8,7 +8,7 @@ export function AppShell({ children, wide }: { children: React.ReactNode; wide?:
         <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
           <div className="flex items-center gap-4">
             <Link href="/" className="font-semibold tracking-tight">
-              NBA Draft App
+              BBall Draft
             </Link>
             <nav className="flex items-center gap-3 text-sm text-zinc-600 dark:text-zinc-300">
               <Link href="/dashboard" className="hover:text-zinc-950 dark:hover:text-white">

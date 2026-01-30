@@ -125,6 +125,9 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
   const rollConstraint = stateSocket.rollConstraint as EligibilityConstraint | null;
   const onlyEligible = stateSocket.onlyEligible;
   const draftName = stateSocket.draftName ?? draft?.name ?? null;
+  const maxRerolls = (stateSocket as { maxRerolls?: number }).maxRerolls ?? 0;
+  const rerollsRemaining =
+    (stateSocket as { rerollsRemaining?: { host: number; guest: number } }).rerollsRemaining ?? ({ host: 0, guest: 0 } as const);
   const pendingSelection = stateSocket.pendingSelection as
     | { host: { id: number; name: string; image_url?: string | null } | null; guest: { id: number; name: string; image_url?: string | null } | null }
     | undefined;
@@ -522,6 +525,15 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
           rollButtonLabel={rollConstraint ? "Reroll" : "Roll"}
           rollDisabled={isSpinning}
           onRoll={() => pickSocket.roll()}
+          rerollsDisplay={
+            maxRerolls > 0
+              ? {
+                  // Rerolls should reflect the player whose turn it is (the only one allowed to click).
+                  remaining: rerollsRemaining[(currentTurn ?? effectiveRole) as "host" | "guest"] ?? 0,
+                  max: maxRerolls,
+                }
+              : null
+          }
           showConstraint={hasAnyConstraintRule}
           isSpinning={isSpinning}
           rollStage={rollStage}

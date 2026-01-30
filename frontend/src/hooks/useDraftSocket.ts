@@ -27,6 +27,8 @@ type DraftWsMessage =
       first_turn?: "host" | "guest" | null;
       current_turn?: "host" | "guest" | null;
       draft_name?: string | null;
+      max_rerolls?: number | null;
+      rerolls_remaining?: { host?: number; guest?: number } | null;
       picks?: Array<{
         pick_number: number;
         role: "host" | "guest";
@@ -99,6 +101,7 @@ type DraftWsMessage =
       };
     }
   | { type: "roll_error"; draft_id: number; message: string }
+  | { type: "rerolls_updated"; draft_id: number; role: "host" | "guest"; remaining: number; max: number }
   | { type: "only_eligible_updated"; draft_id: number; value: boolean }
   | { type: "draft_name_updated"; draft_id: number; value: string }
   | {
@@ -142,6 +145,8 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
   }>({ host: null, guest: null });
   const [onlyEligible, setOnlyEligible] = useState<boolean>(true);
   const [draftName, setDraftName] = useState<string | null>(null);
+  const [maxRerolls, setMaxRerolls] = useState<number>(0);
+  const [rerollsRemaining, setRerollsRemaining] = useState<{ host: number; guest: number }>({ host: 0, guest: 0 });
   const [status, setStatus] = useState<"disabled" | "connecting" | "open" | "closed">(
     enabled ? "connecting" : "disabled",
   );
@@ -188,6 +193,10 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
       setOnlyEligible(true);
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setDraftName(null);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setMaxRerolls(0);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setRerollsRemaining({ host: 0, guest: 0 });
       setStatus("disabled");
       return;
     }
@@ -236,6 +245,15 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
                 setDraftName(msg.draft_name);
               } else if (msg.draft_name === null) {
                 setDraftName(null);
+              }
+              if (typeof msg.max_rerolls === "number") {
+                setMaxRerolls(msg.max_rerolls);
+              }
+              if (msg.rerolls_remaining && typeof msg.rerolls_remaining === "object") {
+                setRerollsRemaining({
+                  host: typeof msg.rerolls_remaining.host === "number" ? msg.rerolls_remaining.host : 0,
+                  guest: typeof msg.rerolls_remaining.guest === "number" ? msg.rerolls_remaining.guest : 0,
+                });
               }
               if (Array.isArray(msg.picks)) {
                 setPicks(
@@ -305,6 +323,9 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
             setRollText(null);
             setRollStageDecadeLabel(null);
             setLastError(msg.message);
+          } else if (msg.type === "rerolls_updated") {
+            setMaxRerolls(msg.max);
+            setRerollsRemaining((prev) => ({ ...prev, [msg.role]: msg.remaining }));
           } else if (msg.type === "only_eligible_updated") {
             setOnlyEligible(msg.value);
           } else if (msg.type === "draft_name_updated") {
@@ -418,6 +439,8 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
     draftName,
     setDraftNameValue,
     selectPlayerPreview,
+    maxRerolls,
+    rerollsRemaining,
   };
 }
 

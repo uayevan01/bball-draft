@@ -13,6 +13,7 @@ export function MainInfoCard({
   rollButtonLabel,
   rollDisabled,
   onRoll,
+  rerollsDisplay,
   showConstraint,
   isSpinning,
   rollStage,
@@ -30,6 +31,7 @@ export function MainInfoCard({
   rollButtonLabel: string;
   rollDisabled: boolean;
   onRoll: () => void;
+  rerollsDisplay: { remaining: number; max: number } | null;
   showConstraint: boolean;
   isSpinning: boolean;
   rollStage: null | "idle" | "spinning_decade" | "spinning_team" | "spinning_letter";
@@ -97,14 +99,25 @@ export function MainInfoCard({
 
         <div className="flex flex-none items-center justify-center gap-2 md:justify-end">
           {showRollButton && canRoll ? (
-            <button
-              type="button"
-              onClick={onRoll}
-              disabled={rollDisabled}
-              className="h-10 rounded-full bg-zinc-950 px-4 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-60 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
-            >
-              {rollButtonLabel}
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={onRoll}
+                disabled={rollDisabled}
+                className="h-10 rounded-full bg-zinc-950 px-4 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-60 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
+              >
+                {rollButtonLabel}
+              </button>
+              {rerollsDisplay ? (
+                <div
+                  className={`text-xs font-semibold tabular-nums ${
+                    rerollsDisplay.remaining > 0 ? "text-emerald-400" : "text-red-400"
+                  }`}
+                >
+                  {rerollsDisplay.remaining}/{rerollsDisplay.max}
+                </div>
+              ) : null}
+            </>
           ) : null}
         </div>
       </div>

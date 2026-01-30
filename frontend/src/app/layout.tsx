@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "NBA Draft App",
+  title: "BBall Draft",
   description: "Head-to-head NBA draft game with custom draft types.",
 };
 

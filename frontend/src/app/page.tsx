@@ -5,7 +5,7 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-zinc-50 text-zinc-950 dark:bg-black dark:text-zinc-50">
       <main className="mx-auto flex min-h-screen max-w-5xl flex-col justify-center px-6 py-20">
-        <p className="text-sm font-medium text-zinc-600 dark:text-zinc-300">NBA Draft App</p>
+        <p className="text-sm font-medium text-zinc-600 dark:text-zinc-300">BBall Draft</p>
         <h1 className="mt-3 text-4xl font-semibold tracking-tight sm:text-5xl">
           Draft head-to-head teams with custom rules.
         </h1>
