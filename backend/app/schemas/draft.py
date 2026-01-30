@@ -37,6 +37,8 @@ class DraftOut(ORMBaseModel):
     show_suggestions: bool
     status: str
     name: str | None = None
+    host_rerolls: int = 0
+    guest_rerolls: int = 0
     created_at: datetime
     completed_at: datetime | None = None
 

@@ -40,6 +40,14 @@ async def create_draft(
     if not dt:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Draft type not found")
 
+    rules = dt.rules if isinstance(dt.rules, dict) else {}
+    allow_reroll = bool(rules.get("allow_reroll", True))
+    try:
+        max_rerolls = int(rules.get("max_rerolls", 0))
+    except Exception:  # noqa: BLE001
+        max_rerolls = 0
+    max_rerolls = max(0, max_rerolls) if allow_reroll else 0
+
     draft = Draft(
         draft_type_id=payload.draft_type_id,
         host_id=user.id,
@@ -47,6 +55,8 @@ async def create_draft(
         show_suggestions=payload.show_suggestions,
         name=dt.name,
         status="lobby",
+        host_rerolls=max_rerolls,
+        guest_rerolls=max_rerolls,
     )
     db.add(draft)
     await db.commit()

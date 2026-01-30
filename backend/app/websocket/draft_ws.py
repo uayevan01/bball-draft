@@ -244,6 +244,15 @@ async def _load_rules_for_draft(draft_id: int) -> dict:
         return dt.rules if dt and isinstance(dt.rules, dict) else {}
 
 
+def _max_rerolls_from_rules(rules: dict) -> int:
+    allow_reroll = bool(rules.get("allow_reroll", True))
+    try:
+        max_r = int(rules.get("max_rerolls", 0))
+    except Exception:  # noqa: BLE001
+        max_r = 0
+    return max(0, max_r) if allow_reroll else 0
+
+
 def _stage_order_from_rules(rules: dict) -> list[str]:
     spin_fields = rules.get("spin_fields") if isinstance(rules.get("spin_fields"), list) else []
     out: list[str] = []
@@ -466,6 +475,13 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
         # Load draft type rules for lobby settings defaults.
         draft_type = await db.get(DraftType, draft.draft_type_id) if draft.draft_type_id else None
         rules = draft_type.rules if draft_type and isinstance(draft_type.rules, dict) else {}
+        max_rerolls = _max_rerolls_from_rules(rules)
+
+        # Initialize persisted rerolls if missing/zeroed for legacy drafts.
+        if draft.host_rerolls is None or draft.guest_rerolls is None:
+            draft.host_rerolls = max_rerolls
+            draft.guest_rerolls = max_rerolls
+            await db.commit()
 
         picks_stmt = (
             select(DraftPick)
@@ -518,6 +534,8 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
             "pending_selection": session.pending_selection,
             "only_eligible": session.only_eligible,
             "draft_name": session.draft_name,
+            "max_rerolls": max_rerolls,
+            "rerolls_remaining": {"host": draft.host_rerolls, "guest": draft.guest_rerolls},
         },
     )
 
@@ -561,6 +579,33 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
                     continue
 
                 rules = await _load_rules_for_draft(draft_id)
+                max_rerolls = _max_rerolls_from_rules(rules)
+
+                # Enforce reroll limit (persisted in DB): first roll of a turn is free;
+                # subsequent rolls consume role-specific rerolls.
+                is_reroll = False
+                async with session.lock:
+                    is_reroll = session.current_constraint is not None
+                if is_reroll:
+                    async with SessionLocal() as db:
+                        d = await db.get(Draft, draft_id, with_for_update=True)
+                        if not d:
+                            continue
+                        if role == "host":
+                            if d.host_rerolls <= 0:
+                                continue
+                            d.host_rerolls -= 1
+                            remaining = d.host_rerolls
+                        else:
+                            if d.guest_rerolls <= 0:
+                                continue
+                            d.guest_rerolls -= 1
+                            remaining = d.guest_rerolls
+                        await db.commit()
+                    await draft_manager.broadcast(
+                        session,
+                        {"type": "rerolls_updated", "draft_id": draft_id, "role": role, "remaining": remaining, "max": max_rerolls},
+                    )
                 stages = _stage_order_from_rules(rules)
                 logger.info("roll stages draft_id=%s role=%s stages=%s", draft_id, role, stages)
 
