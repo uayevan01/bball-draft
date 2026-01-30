@@ -32,7 +32,6 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
   const [role] = useState<"host" | "guest">("host");
   const [joinError, setJoinError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [inviteUrl, setInviteUrl] = useState<string>("");
   const [rules, setRules] = useState<DraftRules | null>(null);
   const [staticTeams, setStaticTeams] = useState<TeamLite[]>([]);
 
@@ -492,12 +491,10 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
         currentTurnText={`Turn: ${currentTurn ?? "—"}`}
         showInvite={!isLocal}
         copied={copied}
-        inviteUrl={inviteUrl}
-        onCopyInvite={async () => {
-          const url = `${window.location.origin}/draft/${draft?.public_id ?? draftRef}`;
-          setInviteUrl(url);
+        draftId={String(draft?.public_id ?? draftRef)}
+        onCopyDraftId={async () => {
           try {
-            await navigator.clipboard.writeText(url);
+            await navigator.clipboard.writeText(String(draft?.public_id ?? draftRef));
             setCopied(true);
             window.setTimeout(() => setCopied(false), 1500);
           } catch {

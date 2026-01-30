@@ -116,6 +116,10 @@ async def get_draft(
     if settings.app_env.lower() == "dev" and settings.auth_optional_in_dev:
         return draft
     if user.id not in {draft.host_id, draft.guest_id}:
+        # Allow a signed-in user to open an invite link and claim the empty guest slot.
+        # The frontend will immediately POST /join to persist guest_id.
+        if draft.status == "lobby" and draft.guest_id is None and user.id != draft.host_id:
+            return draft
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed")
     return draft
 

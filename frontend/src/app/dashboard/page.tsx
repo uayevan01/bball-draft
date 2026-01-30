@@ -1,4 +1,5 @@
 import { AppShell } from "@/components/AppShell";
+import { JoinDraftById } from "@/components/JoinDraftById";
 import { RecentDrafts } from "@/components/RecentDrafts";
 import { UsernameSettings } from "@/components/UsernameSettings";
 
@@ -9,8 +10,9 @@ export default function DashboardPage() {
       <p className="mt-2 text-zinc-600 dark:text-zinc-300">
         This will show your recent drafts, draft types, and game results.
       </p>
-      <RecentDrafts />
       <UsernameSettings />
+      <JoinDraftById />
+      <RecentDrafts />
     </AppShell>
   );
 }

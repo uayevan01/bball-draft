@@ -16,8 +16,8 @@ export function DraftLobbyHeader({
   currentTurnText,
   showInvite,
   copied,
-  inviteUrl,
-  onCopyInvite,
+  draftId,
+  onCopyDraftId,
   showStartDraft,
   startDraftDisabled,
   onStartDraft,
@@ -35,8 +35,8 @@ export function DraftLobbyHeader({
   currentTurnText: string;
   showInvite: boolean;
   copied: boolean;
-  inviteUrl: string;
-  onCopyInvite: () => void;
+  draftId: string;
+  onCopyDraftId: () => void;
   showStartDraft: boolean;
   startDraftDisabled: boolean;
   onStartDraft: () => void;
@@ -89,18 +89,12 @@ export function DraftLobbyHeader({
           <>
             <button
               type="button"
-              onClick={onCopyInvite}
+              onClick={onCopyDraftId}
               className="inline-flex h-10 items-center justify-center rounded-full border border-black/10 bg-white px-4 text-sm font-semibold text-zinc-950 hover:bg-black/5 dark:border-white/10 dark:bg-zinc-900 dark:text-white dark:hover:bg-zinc-800"
             >
-              {copied ? "Copied!" : "Copy invite link"}
+              {copied ? "Copied!" : "Copy draft ID"}
             </button>
-            {inviteUrl ? (
-              <input
-                readOnly
-                value={inviteUrl}
-                className="hidden h-10 w-[360px] rounded-full border border-black/10 bg-white px-4 text-xs text-zinc-700 dark:border-white/10 dark:bg-zinc-900 dark:text-zinc-200 md:block"
-              />
-            ) : null}
+            <div className="hidden font-mono text-xs text-zinc-500 dark:text-zinc-400 md:block">{draftId}</div>
             <Link href="/history" className="hidden text-xs text-zinc-600 hover:underline dark:text-zinc-300 md:block">
               History
             </Link>
