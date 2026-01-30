@@ -7,9 +7,24 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from app.config import settings
 
 
+def _normalize_async_database_url(url: str) -> str:
+    """
+    Fly/Neon often provide DATABASE_URL as:
+      - postgres://...
+      - postgresql://...
+    For SQLAlchemy async runtime we must use an async driver, e.g. postgresql+asyncpg://...
+    """
+    u = (url or "").strip()
+    if u.startswith("postgres://"):
+        return "postgresql+asyncpg://" + u[len("postgres://") :]
+    if u.startswith("postgresql://") and "+asyncpg" not in u and "+psycopg" not in u:
+        return "postgresql+asyncpg://" + u[len("postgresql://") :]
+    return u
+
+
 def create_engine() -> AsyncEngine:
     return create_async_engine(
-        settings.database_url,
+        _normalize_async_database_url(settings.database_url),
         pool_pre_ping=True,
     )
 
