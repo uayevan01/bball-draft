@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
 
 import { useDraftSocket } from "@/hooks/useDraftSocket";
+import { useTurnTabIndicator } from "@/hooks/useTurnTabIndicator";
 import { backendGet, backendPost } from "@/lib/backendClient";
 import type { Draft } from "@/lib/types";
 import type { DraftRules } from "@/lib/draftRules";
@@ -26,7 +27,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
   const searchParams = useSearchParams();
   const { getToken } = useAuth();
   const defaultLocal = searchParams.get("local") === "1";
-  const [isLocal, setIsLocal] = useState<boolean>(defaultLocal);
+  const isLocal = defaultLocal;
   const [draft, setDraft] = useState<Draft | null>(null);
   const [myId, setMyId] = useState<string | null>(null);
   const [role] = useState<"host" | "guest">("host");
@@ -117,6 +118,13 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
   const started = Boolean(firstTurn);
 
   const canPick = isLocal || effectiveRole === currentTurn;
+
+  // If the user is tabbed out and it becomes their turn, blink the tab title to get attention.
+  useTurnTabIndicator({
+    enabled: !isLocal,
+    isMyTurn: Boolean(currentTurn && effectiveRole === currentTurn),
+    label: "Your turn to pick",
+  });
   const pickSocket = isLocal ? (currentTurn === "guest" ? guest : host) : effectiveRole === "guest" ? guest : host;
 
   const rollStage = stateSocket.rollStage;
