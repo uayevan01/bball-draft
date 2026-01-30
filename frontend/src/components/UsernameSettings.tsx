@@ -102,7 +102,7 @@ export function UsernameSettings() {
           className="h-11 rounded-xl border border-black/10 bg-white px-3 text-sm dark:border-white/10 dark:bg-black"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
-          placeholder="e.g. uayevan_2k"
+          placeholder="e.g. nbafan2k"
           autoCapitalize="none"
           autoCorrect="off"
           spellCheck={false}
