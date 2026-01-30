@@ -241,7 +241,8 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
   }, [started, usesRoll, rollConstraint, staticTeams, staticYear, staticNameLetter, staticNamePart]);
 
   const constraintReady = !hasAnyConstraintRule || Boolean(eligibilityConstraint);
-  const canSearch = Boolean(started && canPick && !isSpinning && constraintReady);
+  // Searching should stay enabled even when it's not your turn; only selecting/confirming is gated by canPick.
+  const canSearch = Boolean(started && !isSpinning && constraintReady);
 
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
 

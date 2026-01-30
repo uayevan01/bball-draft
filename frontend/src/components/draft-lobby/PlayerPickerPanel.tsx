@@ -226,6 +226,8 @@ export function PlayerPickerPanel({
                         onPickPlayer(selected.id);
                         onPreviewPlayer(null);
                         setSelected(null);
+                        setQ("");
+                        setResults([]);
                       }}
                       className="h-10 whitespace-nowrap rounded-full bg-zinc-950 px-4 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-60 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
                     >
@@ -334,10 +336,14 @@ export function PlayerPickerPanel({
                   <button
                     key={p.id}
                     type="button"
-                    disabled={!canSearch || isDrafted}
+                    disabled={!canSearch || isDrafted || !canPick}
                     onClick={() => {
+                      if (!canPick) return;
                       setSelected(p);
                       onPreviewPlayer(p.id);
+                      // Clear search after selecting so the user can immediately confirm (or re-search cleanly).
+                      setQ("");
+                      setResults([]);
                     }}
                     className="flex items-center justify-between rounded-xl border border-black/10 px-3 py-2 text-left text-sm hover:bg-black/5 disabled:opacity-60 dark:border-white/10 dark:hover:bg-white/10"
                   >
@@ -351,7 +357,9 @@ export function PlayerPickerPanel({
                       />
                       <span className="truncate">{p.name}</span>
                     </span>
-                    <span className="text-xs text-zinc-500 dark:text-zinc-400">{isDrafted ? "Drafted" : "Select"}</span>
+                    <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                      {isDrafted ? "Drafted" : canPick ? "Select" : "Wait"}
+                    </span>
                   </button>
                 );
               })}
