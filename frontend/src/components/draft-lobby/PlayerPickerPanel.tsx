@@ -173,8 +173,9 @@ export function PlayerPickerPanel({
     if (!canPick) return false;
     if (isSpinning) return false;
     if (drafted(selected.id)) return false;
-    if (!constraint) return false;
-    if (constraint.nameLetter) {
+    // Constraint can be null when the draft type has no eligibility restrictions (no roll + any team/year/letter).
+    // In that case, allow the pick.
+    if (constraint?.nameLetter) {
       const part = (constraint.namePart ?? "first") as "first" | "last" | "either";
       if (!matchesNameLetter(selected.name, constraint.nameLetter, part)) return false;
     }
