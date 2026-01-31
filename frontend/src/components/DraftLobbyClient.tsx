@@ -315,8 +315,8 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
       scheduleSpin<string | null>(
         decadeOptions.map((x) => x ?? null),
         (v) => setSpinPreviewDecade(v),
-        900,
-        55,
+        800,
+        100,
         cancelledRef,
       );
     }
@@ -364,8 +364,8 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
             logo_url: pick.logo_url,
           })),
           (v) => setSpinPreviewTeam(v),
-          1500,
-          60,
+          1200,
+          100,
           cancelledRef,
         );
       } catch {

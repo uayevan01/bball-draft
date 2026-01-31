@@ -650,7 +650,7 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
 
                 for st in stages:
                     await draft_manager.broadcast(session, {"type": "roll_started", "draft_id": draft_id, "by_role": role, "stage": st})
-                    await asyncio.sleep(0.6)
+                    await asyncio.sleep(0.8)
 
                     try:
                         if st == "year":
