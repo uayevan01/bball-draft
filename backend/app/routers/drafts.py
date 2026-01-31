@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import or_, select
@@ -121,6 +122,30 @@ async def get_draft(
         if draft.status == "lobby" and draft.guest_id is None and user.id != draft.host_id:
             return draft
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed")
+
+    # Backwards compatibility: if the draft is effectively complete but still marked as "drafting",
+    # normalize the persisted status so clients can rely on it.
+    if draft.status != "completed":
+        host_count = 0
+        guest_count = 0
+        for p in draft.picks:
+            r = getattr(p, "role", None)
+            if r == "host":
+                host_count += 1
+            elif r == "guest":
+                guest_count += 1
+            else:
+                # Legacy rows: infer by user_id.
+                if p.user_id == draft.host_id:
+                    host_count += 1
+                elif draft.guest_id and p.user_id == draft.guest_id:
+                    guest_count += 1
+        if host_count >= draft.picks_per_player and guest_count >= draft.picks_per_player:
+            draft.status = "completed"
+            if draft.completed_at is None:
+                draft.completed_at = datetime.now(timezone.utc)
+            await db.commit()
+            await db.refresh(draft)
     return draft
 
 

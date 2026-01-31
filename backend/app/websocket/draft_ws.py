@@ -4,6 +4,7 @@ import asyncio
 import logging
 import random
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -502,6 +503,18 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
             }
             for p in picks
         ]
+
+        # Backwards compatibility: if draft is effectively complete but still marked "drafting",
+        # normalize persisted status so clients can rely on it.
+        if draft.status != "completed":
+            host_count = sum(1 for r in pick_rows if r.get("role") == "host")
+            guest_count = sum(1 for r in pick_rows if r.get("role") == "guest")
+            if host_count >= draft.picks_per_player and guest_count >= draft.picks_per_player:
+                draft.status = "completed"
+                if draft.completed_at is None:
+                    draft.completed_at = datetime.now(timezone.utc)
+                await db.commit()
+
         started = draft.status != "lobby"
         first_turn = draft.first_turn if draft.first_turn in ("host", "guest") else None
         # Backfill for already-started drafts that were created before first_turn was persisted:
@@ -525,6 +538,7 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
             "type": "lobby_ready",
             "draft_id": draft_id,
             "draft_public_id": str(draft.public_id),
+            "status": draft.status,
             "connected": list(session.conns.keys()),
             "started": session.started,
             "first_turn": session.first_turn,
@@ -565,6 +579,7 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
                         "type": "draft_started",
                         "draft_id": draft_id,
                         "first_turn": first,
+                        "status": "drafting",
                     },
                 )
             elif msg_type == "roll":
@@ -731,6 +746,7 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
                     continue
 
                 # Persist the pick (minimal validation: player exists).
+                draft_status = "drafting"
                 async with SessionLocal() as db:
                     draft = await db.get(Draft, draft_id)
                     if not draft:
@@ -774,6 +790,24 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
                         await draft_manager.send_to(session, role, {"type": "error", "message": "Player already drafted"})
                         continue
 
+                    # If the draft is now complete, persist completion status (and expose it to clients).
+                    draft_status = draft.status
+                    if draft.status != "completed":
+                        counts = (
+                            await db.execute(
+                                select(DraftPick.role, func.count(DraftPick.id))
+                                .where(DraftPick.draft_id == draft_id)
+                                .group_by(DraftPick.role)
+                            )
+                        ).all()
+                        by_role = {r: int(c) for (r, c) in counts if r in ("host", "guest")}
+                        if by_role.get("host", 0) >= draft.picks_per_player and by_role.get("guest", 0) >= draft.picks_per_player:
+                            draft.status = "completed"
+                            if draft.completed_at is None:
+                                draft.completed_at = datetime.now(timezone.utc)
+                            await db.commit()
+                        draft_status = draft.status
+
                 # Update in-memory pick list too (for newly-connected clients that rely on lobby_ready state).
                 async with session.lock:
                     session.picks.append(
@@ -794,6 +828,7 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
                     {
                         "type": "pick_made",
                         "draft_id": draft_id,
+                        "draft_status": draft_status,
                         "pick_number": pick_number,
                         "role": role,
                         "player_id": player_id,

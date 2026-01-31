@@ -119,12 +119,6 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
 
   const canPick = isLocal || effectiveRole === currentTurn;
 
-  // If the user is tabbed out and it becomes their turn, blink the tab title to get attention.
-  useTurnTabIndicator({
-    enabled: !isLocal,
-    isMyTurn: Boolean(currentTurn && effectiveRole === currentTurn),
-    label: "Your turn to pick",
-  });
   const pickSocket = isLocal ? (currentTurn === "guest" ? guest : host) : effectiveRole === "guest" ? guest : host;
 
   const rollStage = stateSocket.rollStage;
@@ -425,6 +419,20 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
   const hostPicks = picks.filter((p) => p.role === "host");
   const guestPicks = picks.filter((p) => p.role === "guest");
   const picksPerPlayer = draft?.picks_per_player ?? 10;
+  const wsStatus = (stateSocket as { draftStatus?: string | null }).draftStatus ?? null;
+  const persistedStatus = wsStatus ?? draft?.status ?? null;
+  const draftComplete =
+    persistedStatus === "completed" ||
+    // Back-compat safety-net: if a legacy draft is complete but status wasn't updated yet,
+    // still show completion UI (server should auto-fix on load).
+    (started && hostPicks.length >= picksPerPlayer && guestPicks.length >= picksPerPlayer);
+
+  // Stop attention pings once the draft is complete.
+  useTurnTabIndicator({
+    enabled: !isLocal,
+    isMyTurn: !draftComplete && Boolean(currentTurn && effectiveRole === currentTurn),
+    label: "Your turn to pick",
+  });
 
   const [expandedPick, setExpandedPick] = useState<number | null>(null);
   const [detailsByPlayerId, setDetailsByPlayerId] = useState<Record<number, PlayerDetail | undefined>>({});
@@ -497,7 +505,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
         }}
         draftPathText={`/draft/${draft?.public_id ?? draftRef}`}
         connectedText={`Connected: ${connectedRoles.length ? connectedRoles.join(", ") : "(none)"}`}
-        currentTurnText={`Turn: ${currentTurn ?? "—"}`}
+        currentTurnText={draftComplete ? "Draft complete" : `Turn: ${currentTurn ?? "—"}`}
         showInvite={!isLocal}
         copied={copied}
         draftId={String(draft?.public_id ?? draftRef)}
@@ -526,7 +534,8 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
           currentTurnName={currentTurn ? displayName(currentTurn) : "—"}
           isLocal={isLocal}
           infoMessage={infoMessage}
-          showRollButton={usesRoll}
+          draftComplete={draftComplete}
+          showRollButton={usesRoll && !draftComplete}
           canRoll={canPick}
           rollButtonLabel={rollConstraint ? "Reroll" : "Roll"}
           rollDisabled={isSpinning}
@@ -540,7 +549,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
                 }
               : null
           }
-          showConstraint={hasAnyConstraintRule}
+          showConstraint={hasAnyConstraintRule && !draftComplete}
           isSpinning={isSpinning}
           rollStage={rollStage}
           spinPreviewDecade={spinPreviewDecade}
@@ -563,12 +572,12 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
         </div>
       ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className={`grid gap-4 ${draftComplete ? "lg:grid-cols-2" : "lg:grid-cols-3"}`}>
         <DraftSideColumn
           label="Host"
           name={displayName("host")}
           avatarUrl={avatarUrl("host")}
-          isYourTurn={isYourTurnForSide("host")}
+          isYourTurn={!draftComplete && isYourTurnForSide("host")}
           picks={hostPicks as DraftPickWs[]}
           totalSlots={picksPerPlayer}
           renderPick={(p, slotNumber) => (
@@ -586,43 +595,45 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
           )}
         />
 
-        <PlayerPickerPanel
-          started={started}
-          canPick={canPick}
-          isSpinning={isSpinning}
-          currentTurn={currentTurn}
-          isLocal={isLocal}
-          onlyEligible={onlyEligible}
-          showOnlyEligibleToggle={hasAnyConstraintRule && (isLocal || effectiveRole === "host")}
-          onOnlyEligibleChange={(v) => host.setOnlyEligiblePlayers(v)}
-          constraint={eligibilityConstraint}
-          pendingSelection={pendingSelection ?? { host: null, guest: null }}
-          myRole={effectiveRole}
-          onPreviewPlayer={(playerId) => pickSocket.selectPlayerPreview(playerId)}
-          drafted={(pid) => draftedIds.has(pid)}
-          canSearch={canSearch}
-          searchError={null}
-          onPickPlayer={(playerId) => {
-            const teams = eligibilityConstraint?.teams ?? [];
-            const teamLabel =
-              teams.length === 0
-                ? null
-                : teams
-                    .map((t) => t.team.abbreviation ?? t.team.name)
-                    .filter(Boolean)
-                    .join(",");
-            pickSocket.makePick(playerId, {
-              constraint_team: teamLabel,
-              constraint_year: eligibilityConstraint?.yearLabel ?? null,
-            });
-          }}
-        />
+        {!draftComplete ? (
+          <PlayerPickerPanel
+            started={started}
+            canPick={canPick}
+            isSpinning={isSpinning}
+            currentTurn={currentTurn}
+            isLocal={isLocal}
+            onlyEligible={onlyEligible}
+            showOnlyEligibleToggle={hasAnyConstraintRule && (isLocal || effectiveRole === "host")}
+            onOnlyEligibleChange={(v) => host.setOnlyEligiblePlayers(v)}
+            constraint={eligibilityConstraint}
+            pendingSelection={pendingSelection ?? { host: null, guest: null }}
+            myRole={effectiveRole}
+            onPreviewPlayer={(playerId) => pickSocket.selectPlayerPreview(playerId)}
+            drafted={(pid) => draftedIds.has(pid)}
+            canSearch={canSearch}
+            searchError={null}
+            onPickPlayer={(playerId) => {
+              const teams = eligibilityConstraint?.teams ?? [];
+              const teamLabel =
+                teams.length === 0
+                  ? null
+                  : teams
+                      .map((t) => t.team.abbreviation ?? t.team.name)
+                      .filter(Boolean)
+                      .join(",");
+              pickSocket.makePick(playerId, {
+                constraint_team: teamLabel,
+                constraint_year: eligibilityConstraint?.yearLabel ?? null,
+              });
+            }}
+          />
+        ) : null}
 
         <DraftSideColumn
           label="Guest"
           name={displayName("guest")}
           avatarUrl={avatarUrl("guest")}
-          isYourTurn={isYourTurnForSide("guest")}
+          isYourTurn={!draftComplete && isYourTurnForSide("guest")}
           picks={guestPicks as DraftPickWs[]}
           totalSlots={picksPerPlayer}
           renderPick={(p, slotNumber) => (

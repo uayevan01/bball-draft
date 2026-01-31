@@ -8,6 +8,7 @@ export function MainInfoCard({
   currentTurnName,
   isLocal,
   infoMessage,
+  draftComplete,
   showRollButton,
   canRoll,
   rollButtonLabel,
@@ -26,6 +27,7 @@ export function MainInfoCard({
   currentTurnName: string;
   isLocal: boolean;
   infoMessage: string | null;
+  draftComplete?: boolean;
   showRollButton: boolean;
   canRoll: boolean;
   rollButtonLabel: string;
@@ -89,16 +91,18 @@ export function MainInfoCard({
     <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-900/50">
       <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-center">
         <div className="min-w-0 text-center md:text-left">
-          <div className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">Current turn</div>
+          <div className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">{draftComplete ? "Draft" : "Current turn"}</div>
           <div className="mt-1 text-sm font-semibold text-zinc-950 dark:text-white">
-            {currentTurnName}
+            {draftComplete ? "Draft Complete" : currentTurnName}
             {isLocal ? <span className="ml-2 text-xs font-normal text-zinc-500 dark:text-zinc-400">(local)</span> : null}
           </div>
-          {infoMessage ? <div className="mt-2 text-sm text-zinc-700 dark:text-zinc-200">{infoMessage}</div> : null}
+          {!draftComplete && infoMessage ? (
+            <div className="mt-2 text-sm text-zinc-700 dark:text-zinc-200">{infoMessage}</div>
+          ) : null}
         </div>
 
         <div className="flex flex-none items-center justify-center gap-2 md:justify-end">
-          {showRollButton && canRoll ? (
+          {!draftComplete && showRollButton && canRoll ? (
             <>
               <button
                 type="button"
@@ -122,7 +126,7 @@ export function MainInfoCard({
         </div>
       </div>
 
-      {showConstraint ? (
+      {!draftComplete && showConstraint ? (
         <div className="mt-4 flex justify-center">
           <div className="w-full max-w-3xl rounded-2xl border border-black/10 bg-black/5 px-5 py-4 text-center dark:border-white/10 dark:bg-white/10">
             {isSpinning ? (

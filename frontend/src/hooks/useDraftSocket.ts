@@ -22,6 +22,7 @@ type DraftWsMessage =
   | {
       type: "lobby_ready";
       draft_id: number;
+      status?: string;
       connected: string[];
       started?: boolean;
       first_turn?: "host" | "guest" | null;
@@ -53,10 +54,11 @@ type DraftWsMessage =
       only_eligible?: boolean | null;
     }
   | { type: "lobby_update"; draft_id: number; connected: string[] }
-  | { type: "draft_started"; draft_id: number; first_turn: string }
+  | { type: "draft_started"; draft_id: number; first_turn: string; status?: string }
   | {
       type: "pick_made";
       draft_id: number;
+      draft_status?: string;
       pick_number: number;
       role: "host" | "guest";
       player_id: number;
@@ -114,6 +116,7 @@ type DraftWsMessage =
 
 export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled: boolean = true) {
   const [connectedRoles, setConnectedRoles] = useState<string[]>([]);
+  const [draftStatus, setDraftStatus] = useState<string | null>(null);
   const [firstTurn, setFirstTurn] = useState<string | null>(null);
   const [currentTurn, setCurrentTurn] = useState<"host" | "guest" | null>(null);
   const [picks, setPicks] = useState<
@@ -219,6 +222,9 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
           if (msg.type === "lobby_ready" || msg.type === "lobby_update") {
             setConnectedRoles(msg.connected);
             if (msg.type === "lobby_ready") {
+              if (typeof msg.status === "string") {
+                setDraftStatus(msg.status);
+              }
               if (typeof msg.first_turn === "string") {
                 setFirstTurn(msg.first_turn);
               }
@@ -274,6 +280,7 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
           } else if (msg.type === "draft_started") {
             setFirstTurn(msg.first_turn);
             setCurrentTurn(msg.first_turn as "host" | "guest");
+            setDraftStatus(typeof msg.status === "string" ? msg.status : "drafting");
           } else if (msg.type === "error") {
             setLastError(msg.message);
           } else if (msg.type === "pick_made") {
@@ -290,6 +297,9 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
               },
             ].sort((a, b) => a.pick_number - b.pick_number));
             setCurrentTurn(msg.next_turn);
+            if (typeof msg.draft_status === "string") {
+              setDraftStatus(msg.draft_status);
+            }
             // New turn => clear previous roll constraint.
             setRollConstraint(null);
             setRollStage(null);
@@ -421,6 +431,7 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
 
   return {
     connectedRoles,
+    draftStatus,
     firstTurn,
     currentTurn,
     picks,
