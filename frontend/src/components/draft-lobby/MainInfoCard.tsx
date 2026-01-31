@@ -89,14 +89,21 @@ export function MainInfoCard({
     <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-900/50">
       <div className="grid gap-3">
         <div className="min-w-0 text-center md:text-left">
-          <div className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">{draftComplete ? "Draft" : "Current turn"}</div>
+          <div className="flex items-baseline justify-between gap-3">
+            <div className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">{draftComplete ? "Draft" : "Current turn"}</div>
+            {!draftComplete && infoMessage ? (
+              <div className="max-w-[60%] truncate text-xs font-medium text-zinc-600 dark:text-zinc-300">
+                {infoMessage}
+              </div>
+            ) : (
+              // Keep the row height stable even when the ephemeral message isn't shown.
+              <div className="max-w-[60%] truncate text-xs font-medium text-transparent select-none">.</div>
+            )}
+          </div>
           <div className="mt-1 text-sm font-semibold text-zinc-950 dark:text-white">
             {draftComplete ? "Draft Complete" : currentTurnName}
             {isLocal ? <span className="ml-2 text-xs font-normal text-zinc-500 dark:text-zinc-400">(local)</span> : null}
           </div>
-          {!draftComplete && infoMessage ? (
-            <div className="mt-2 text-sm text-zinc-700 dark:text-zinc-200">{infoMessage}</div>
-          ) : null}
         </div>
       </div>
 
