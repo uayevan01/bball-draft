@@ -12,9 +12,8 @@ export function DraftCreateForm({ draftTypes }: { draftTypes: DraftType[] }) {
   const router = useRouter();
   const { getToken } = useAuth();
 
-  const defaultDraftTypeId = useMemo(() => draftTypes[0]?.id, [draftTypes]);
-
-  const [draftTypeId, setDraftTypeId] = useState<number | undefined>(defaultDraftTypeId);
+  // No default selection: force the user to explicitly choose a draft type.
+  const [draftTypeId, setDraftTypeId] = useState<number | null>(null);
   const [picksPerPlayer, setPicksPerPlayer] = useState<number>(10);
   const [showSuggestions, setShowSuggestions] = useState<boolean>(true);
   const [localMode, setLocalMode] = useState<boolean>(false);
@@ -59,16 +58,22 @@ export function DraftCreateForm({ draftTypes }: { draftTypes: DraftType[] }) {
         <select
           className="h-11 rounded-xl border border-black/10 bg-white px-3 text-sm dark:border-white/10 dark:bg-black"
           value={draftTypeId ?? ""}
-          onChange={(e) => setDraftTypeId(Number(e.target.value))}
+          onChange={(e) => {
+            const v = e.target.value;
+            setDraftTypeId(v ? Number(v) : null);
+          }}
         >
           {draftTypes.length === 0 ? (
             <option value="">No draft types available</option>
           ) : (
-            draftTypes.map((dt) => (
-              <option key={dt.id} value={dt.id}>
-                {dt.name}
-              </option>
-            ))
+            <>
+              <option value="">Select a draft type</option>
+              {draftTypes.map((dt) => (
+                <option key={dt.id} value={dt.id}>
+                  {dt.name}
+                </option>
+              ))}
+            </>
           )}
         </select>
       </div>
