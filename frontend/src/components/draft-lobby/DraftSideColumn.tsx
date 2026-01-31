@@ -9,6 +9,7 @@ export function DraftSideColumn({
   name,
   avatarUrl,
   isYourTurn,
+  rerollsDisplay,
   picks,
   renderPick,
   totalSlots,
@@ -17,6 +18,7 @@ export function DraftSideColumn({
   name: string;
   avatarUrl: string | null;
   isYourTurn: boolean;
+  rerollsDisplay?: { remaining: number; max: number } | null;
   picks: DraftPickWs[];
   renderPick: (p: DraftPickWs, slotNumber: number) => React.ReactNode;
   totalSlots: number;
@@ -24,8 +26,8 @@ export function DraftSideColumn({
   const sorted = [...picks].sort((a, b) => a.pick_number - b.pick_number);
   return (
     <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-900/50">
-      <div className="flex items-baseline justify-between gap-3">
-        <div className="flex items-center gap-2 text-sm font-semibold">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
           <Image
             src={avatarUrl || "/avatar-placeholder.svg"}
             alt={name}
@@ -33,12 +35,26 @@ export function DraftSideColumn({
             height={28}
             className="h-7 w-7 flex-none rounded-full object-cover"
           />
-          <span className="truncate">{name}</span>
-          {isYourTurn ? (
-            <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-[11px] font-semibold text-white">YOUR TURN</span>
-          ) : null}
+          <div className="min-w-0">
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="truncate text-sm font-semibold">{name}</span>
+              {isYourTurn ? (
+                <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-[11px] font-semibold text-white">YOUR TURN</span>
+              ) : null}
+            </div>
+            <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{label}</div>
+          </div>
         </div>
-        <div className="text-xs text-zinc-500 dark:text-zinc-400">{label}</div>
+        {rerollsDisplay ? (
+          <div
+            className={`text-xs font-semibold tabular-nums ${
+              rerollsDisplay.remaining > 0 ? "text-emerald-400" : "text-red-400"
+            }`}
+            title="Rerolls remaining"
+          >
+            {rerollsDisplay.remaining}/{rerollsDisplay.max}
+          </div>
+        ) : null}
       </div>
       <div className="mt-3 grid gap-2">
         {Array.from({ length: Math.max(0, totalSlots) }).map((_, idx) => {

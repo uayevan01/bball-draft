@@ -540,15 +540,6 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
           rollButtonLabel={rollConstraint ? "Reroll" : "Roll"}
           rollDisabled={isSpinning}
           onRoll={() => pickSocket.roll()}
-          rerollsDisplay={
-            maxRerolls > 0
-              ? {
-                  // Rerolls should reflect the player whose turn it is (the only one allowed to click).
-                  remaining: rerollsRemaining[(currentTurn ?? effectiveRole) as "host" | "guest"] ?? 0,
-                  max: maxRerolls,
-                }
-              : null
-          }
           showConstraint={hasAnyConstraintRule && !draftComplete}
           isSpinning={isSpinning}
           rollStage={rollStage}
@@ -578,6 +569,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
           name={displayName("host")}
           avatarUrl={avatarUrl("host")}
           isYourTurn={!draftComplete && isYourTurnForSide("host")}
+          rerollsDisplay={maxRerolls > 0 ? { remaining: rerollsRemaining.host ?? 0, max: maxRerolls } : null}
           picks={hostPicks as DraftPickWs[]}
           totalSlots={picksPerPlayer}
           renderPick={(p, slotNumber) => (
@@ -634,6 +626,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
           name={displayName("guest")}
           avatarUrl={avatarUrl("guest")}
           isYourTurn={!draftComplete && isYourTurnForSide("guest")}
+          rerollsDisplay={maxRerolls > 0 ? { remaining: rerollsRemaining.guest ?? 0, max: maxRerolls } : null}
           picks={guestPicks as DraftPickWs[]}
           totalSlots={picksPerPlayer}
           renderPick={(p, slotNumber) => (

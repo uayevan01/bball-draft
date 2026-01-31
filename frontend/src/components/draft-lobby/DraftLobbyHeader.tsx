@@ -79,7 +79,6 @@ export function DraftLobbyHeader({
             </>
           )}
         </div>
-        <div className="font-mono text-xs text-zinc-500 dark:text-zinc-400">{draftPathText}</div>
         <div className="text-zinc-600 dark:text-zinc-300">{connectedText}</div>
         <div className="text-zinc-600 dark:text-zinc-300">{currentTurnText}</div>
       </div>
@@ -94,7 +93,7 @@ export function DraftLobbyHeader({
             >
               {copied ? "Copied!" : "Copy draft ID"}
             </button>
-            <div className="hidden font-mono text-xs text-zinc-500 dark:text-zinc-400 md:block">{draftId}</div>
+            {/* <div className="hidden font-mono text-xs text-zinc-500 dark:text-zinc-400 md:block">{draftId}</div> */}
             <Link href="/history" className="hidden text-xs text-zinc-600 hover:underline dark:text-zinc-300 md:block">
               History
             </Link>
