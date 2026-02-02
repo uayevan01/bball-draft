@@ -11,6 +11,7 @@ import type { Draft } from "@/lib/types";
 import type { DraftRules } from "@/lib/draftRules";
 import { DraftLobbyHeader } from "@/components/draft-lobby/DraftLobbyHeader";
 import { DraftSideColumn } from "@/components/draft-lobby/DraftSideColumn";
+import { HostSettingsModal } from "@/components/draft-lobby/HostSettingsModal";
 import { MainInfoCard } from "@/components/draft-lobby/MainInfoCard";
 import { PickCard } from "@/components/draft-lobby/PickCard";
 import { PlayerPickerPanel } from "@/components/draft-lobby/PlayerPickerPanel";
@@ -135,7 +136,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
 
   const [draftNameEditing, setDraftNameEditing] = useState(false);
   const [draftNameInput, setDraftNameInput] = useState("");
-  const [hostSettingsOpen, setHostSettingsOpen] = useState(false);
+  const [hostSettingsModalOpen, setHostSettingsModalOpen] = useState(false);
   const [staticTeamsError, setStaticTeamsError] = useState<string | null>(null);
 
   const isSpinning = rollStage === "spinning_decade" || rollStage === "spinning_team" || rollStage === "spinning_letter";
@@ -577,9 +578,32 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
             setCopied(false);
           }
         }}
+        showHostSettingsButton={showHostSettings}
+        onOpenHostSettings={() => setHostSettingsModalOpen(true)}
         showStartDraft={!started && (isLocal || effectiveRole === "host")}
         startDraftDisabled={host.status !== "open"}
         onStartDraft={() => host.startDraft()}
+      />
+
+      <HostSettingsModal
+        open={hostSettingsModalOpen}
+        onClose={() => setHostSettingsModalOpen(false)}
+        canForceReroll={canForceReroll}
+        onForceReroll={() => {
+          const ok = window.confirm(
+            "Force reroll the current constraint? This does NOT consume reroll tokens and will affect both players.",
+          );
+          if (!ok) return;
+          host.forceReroll();
+        }}
+        canUndoPick={canUndoPick}
+        onUndoPick={() => {
+          const ok = window.confirm(
+            "Undo the most recent pick? This will delete the last pick and set it back to that player's turn.",
+          );
+          if (!ok) return;
+          host.undoPick();
+        }}
       />
 
       {lastError || joinError || staticTeamsError ? (
@@ -610,58 +634,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
         />
       ) : null}
 
-      {showHostSettings ? (
-        <div className="rounded-xl border border-black/10 bg-white px-4 py-3 dark:border-white/10 dark:bg-zinc-900/50">
-          <div className="flex items-center justify-between gap-3">
-            <div className="text-sm font-semibold text-zinc-950 dark:text-white">Host Settings</div>
-            <button
-              type="button"
-              className="rounded-md border border-black/10 bg-white px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 disabled:opacity-60 dark:border-white/10 dark:bg-zinc-950/40 dark:text-zinc-200 dark:hover:bg-zinc-950/60"
-              onClick={() => setHostSettingsOpen((v) => !v)}
-            >
-              {hostSettingsOpen ? "Hide" : "Show"}
-            </button>
-          </div>
-
-          {hostSettingsOpen ? (
-            <div className="mt-3 grid gap-2">
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  className="rounded-lg border border-black/10 bg-white px-3 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:bg-zinc-950/40 dark:text-zinc-100 dark:hover:bg-zinc-950/60"
-                  disabled={!canForceReroll}
-                  onClick={() => {
-                    const ok = window.confirm(
-                      "Force reroll the current constraint? This does NOT consume reroll tokens and will affect both players.",
-                    );
-                    if (!ok) return;
-                    host.forceReroll();
-                  }}
-                  title="Force a new roll for the current turn (host-only)"
-                >
-                  Force reroll
-                </button>
-
-                <button
-                  type="button"
-                  className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm font-medium text-red-800 hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-400/20 dark:bg-red-500/10 dark:text-red-200 dark:hover:bg-red-500/15"
-                  disabled={!canUndoPick}
-                  onClick={() => {
-                    const ok = window.confirm(
-                      "Undo the most recent pick? This will delete the last pick and set it back to that player's turn.",
-                    );
-                    if (!ok) return;
-                    host.undoPick();
-                  }}
-                  title="Undo the most recent pick (host-only)"
-                >
-                  Undo last pick
-                </button>
-              </div>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
+      {/* Host settings moved to modal (opened from header). */}
 
       {!started ? (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-black/10 bg-white px-4 py-3 text-sm dark:border-white/10 dark:bg-zinc-900/50">

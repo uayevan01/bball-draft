@@ -12,6 +12,8 @@ export function DraftLobbyHeader({
   showInvite,
   copied,
   onCopyDraftId,
+  showHostSettingsButton,
+  onOpenHostSettings,
   showStartDraft,
   startDraftDisabled,
   onStartDraft,
@@ -29,6 +31,8 @@ export function DraftLobbyHeader({
   copied: boolean;
   draftId: string;
   onCopyDraftId: () => void;
+  showHostSettingsButton?: boolean;
+  onOpenHostSettings?: () => void;
   showStartDraft: boolean;
   startDraftDisabled: boolean;
   onStartDraft: () => void;
@@ -75,15 +79,23 @@ export function DraftLobbyHeader({
 
       <div className="flex items-center gap-3">
         {showInvite ? (
-          <>
-            <button
-              type="button"
-              onClick={onCopyDraftId}
-              className="inline-flex h-10 items-center justify-center rounded-full border border-black/10 bg-white px-4 text-sm font-semibold text-zinc-950 hover:bg-black/5 dark:border-white/10 dark:bg-zinc-900 dark:text-white dark:hover:bg-zinc-800"
-            >
-              {copied ? "Copied!" : "Copy draft ID"}
-            </button>
-          </>
+          <button
+            type="button"
+            onClick={onCopyDraftId}
+            className="inline-flex h-10 items-center justify-center rounded-full border border-black/10 bg-white px-4 text-sm font-semibold text-zinc-950 hover:bg-black/5 dark:border-white/10 dark:bg-zinc-900 dark:text-white dark:hover:bg-zinc-800"
+          >
+            {copied ? "Copied!" : "Copy draft ID"}
+          </button>
+        ) : null}
+
+        {showHostSettingsButton && onOpenHostSettings ? (
+          <button
+            type="button"
+            onClick={onOpenHostSettings}
+            className="inline-flex h-10 items-center justify-center rounded-full border border-black/10 bg-white px-4 text-sm font-semibold text-zinc-950 hover:bg-black/5 dark:border-white/10 dark:bg-zinc-900 dark:text-white dark:hover:bg-zinc-800"
+          >
+            Host settings
+          </button>
         ) : null}
 
         {showStartDraft ? (
