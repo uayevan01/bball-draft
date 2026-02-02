@@ -1,5 +1,3 @@
-import Link from "next/link";
-
 import { AppShell } from "@/components/AppShell";
 import { DraftLobbyClient } from "@/components/DraftLobbyClient";
 
