@@ -581,8 +581,12 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
                 async with session.lock:
                     target = session.current_turn
                     started_now = session.started
+                    current_constraint = session.current_constraint
                 if not started_now or target not in ("host", "guest"):
                     await draft_manager.send_to(session, role, {"type": "error", "message": "Draft not started"})
+                    continue
+                if current_constraint is None:
+                    await draft_manager.send_to(session, role, {"type": "error", "message": "No constraint to reroll"})
                     continue
                 # Force reroll should NOT consume reroll tokens.
                 await _run_roll(by_role=target, consume_rerolls=False)

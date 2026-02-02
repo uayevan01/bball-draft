@@ -136,6 +136,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
   const [draftNameEditing, setDraftNameEditing] = useState(false);
   const [draftNameInput, setDraftNameInput] = useState("");
   const [hostSettingsOpen, setHostSettingsOpen] = useState(false);
+  const [staticTeamsError, setStaticTeamsError] = useState<string | null>(null);
 
   const isSpinning = rollStage === "spinning_decade" || rollStage === "spinning_team" || rollStage === "spinning_letter";
   const spinsYear = Boolean(rules?.spin_fields?.includes("year"));
@@ -143,39 +144,18 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
   const spinsNameLetter = Boolean(rules?.spin_fields?.includes("name_letter"));
   const usesRoll = spinsYear || spinsTeam || spinsNameLetter;
 
-  const staticTeamAbbrs = useMemo(() => {
+  const staticTeamConstraint = useMemo(() => {
+    if (usesRoll) return null;
     const tc = rules?.team_constraint;
-    if (!tc || tc.type !== "specific") return null;
-    const opts = tc.options ?? [];
-    if (!opts.length) return null;
-    return opts.map((x) => String(x).toUpperCase());
-  }, [rules]);
-
-  // Resolve a fixed team constraint (e.g. ["LAL"]) to a team row (id/name/logo) so we can filter eligibility.
-  useEffect(() => {
-    let cancelled = false;
-    async function run() {
-      setStaticTeams([]);
-      if (!staticTeamAbbrs?.length) return;
-      if (usesRoll) return;
-      try {
-        const token = await getToken().catch(() => null);
-        const teams = await backendGet<Array<TeamLite & { abbreviation?: string | null }>>("/teams?limit=500", token);
-        if (cancelled) return;
-        const wanted = new Set(staticTeamAbbrs.map((x) => x.toUpperCase()));
-        const hits = teams
-          .filter((t) => (t.abbreviation ? wanted.has(t.abbreviation.toUpperCase()) : false))
-          .sort((a, b) => String(a.abbreviation ?? "").localeCompare(String(b.abbreviation ?? "")));
-        setStaticTeams(hits);
-      } catch {
-        if (!cancelled) setStaticTeams([]);
-      }
-    }
-    void run();
-    return () => {
-      cancelled = true;
-    };
-  }, [staticTeamAbbrs, usesRoll, getToken]);
+    if (!tc || tc.type === "any") return null;
+    if (tc.type === "specific" || tc.type === "conference" || tc.type === "division") return tc;
+    return null;
+  }, [rules, usesRoll]);
+  const staticTeamConstraintKey = useMemo(() => {
+    if (!staticTeamConstraint) return null;
+    // stable-ish key so effects refire when options change
+    return JSON.stringify({ type: staticTeamConstraint.type, options: staticTeamConstraint.options ?? [] });
+  }, [staticTeamConstraint]);
 
   const staticYear = useMemo(() => {
     const yc = rules?.year_constraint;
@@ -195,6 +175,60 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
     // Multiple options without spin: treat as "any" for now (still eligible by team).
     return { label: "Any year" as const, start: null as number | null, end: null as number | null };
   }, [rules]);
+
+  // Resolve a fixed team constraint (e.g. Pacific division) to concrete team rows so we can filter eligibility.
+  useEffect(() => {
+    let cancelled = false;
+    async function run() {
+      setStaticTeams([]);
+      setStaticTeamsError(null);
+      if (!staticTeamConstraint || !staticTeamConstraintKey) return;
+      try {
+        const params = new URLSearchParams();
+        params.set("limit", "500");
+        if (staticYear?.start != null && staticYear?.end != null) {
+          params.set("active_start_year", String(staticYear.start));
+          params.set("active_end_year", String(staticYear.end));
+        }
+        const token = await getToken().catch(() => null);
+        const teams = await backendGet<
+          Array<
+            TeamLite & {
+              abbreviation?: string | null;
+              conference?: string | null;
+              division?: string | null;
+            }
+          >
+        >(`/teams?${params.toString()}`, token);
+        if (cancelled) return;
+        const opts = staticTeamConstraint.options ?? [];
+        const hitsRaw = (() => {
+          if (staticTeamConstraint.type === "specific") {
+            const wanted = new Set(opts.map((x) => String(x).toUpperCase()));
+            return teams.filter((t) => (t.abbreviation ? wanted.has(String(t.abbreviation).toUpperCase()) : false));
+          }
+          if (staticTeamConstraint.type === "conference") {
+            const allowed = new Set(opts.map((x) => String(x)));
+            return teams.filter((t) => (t.conference ? allowed.has(String(t.conference)) : false));
+          }
+          // division
+          const allowed = new Set(opts.map((x) => String(x)));
+          return teams.filter((t) => (t.division ? allowed.has(String(t.division)) : false));
+        })();
+        const hits = hitsRaw.sort((a, b) => String(a.abbreviation ?? a.name).localeCompare(String(b.abbreviation ?? b.name)));
+        setStaticTeams(hits);
+      } catch (e) {
+        if (!cancelled) {
+          setStaticTeams([]);
+          setStaticTeamsError(e instanceof Error ? e.message : "Failed to load teams");
+        }
+      }
+    }
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [staticTeamConstraintKey, staticTeamConstraint, staticYear?.start, staticYear?.end, getToken]);
 
   const staticNameLetter = useMemo(() => {
     const c = rules?.name_letter_constraint;
@@ -221,19 +255,18 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
       if (!rollConstraint) return null;
       return rollConstraint;
     }
-    if (staticTeams.length) {
-      const segments: ConstraintTeamSegment[] = staticTeams.map((t) => ({ team: t }));
-      return {
-        teams: segments,
-        yearLabel: staticYear?.label ?? "Any year",
-        yearStart: staticYear?.start ?? null,
-        yearEnd: staticYear?.end ?? null,
-        nameLetter: staticNameLetter,
-        namePart: staticNamePart,
-      };
+    const needsTeams = Boolean(staticTeamConstraint);
+    if (needsTeams && !staticTeams.length) return null;
+    const segments: ConstraintTeamSegment[] = staticTeams.map((t) => ({ team: t }));
+    return {
+      teams: needsTeams ? segments : [],
+      yearLabel: staticYear?.label ?? "Any year",
+      yearStart: staticYear?.start ?? null,
+      yearEnd: staticYear?.end ?? null,
+      nameLetter: staticNameLetter,
+      namePart: staticNamePart,
     }
-    return null;
-  }, [started, usesRoll, rollConstraint, staticTeams, staticYear, staticNameLetter, staticNamePart]);
+  }, [started, usesRoll, rollConstraint, staticTeams, staticTeamConstraint, staticYear, staticNameLetter, staticNamePart]);
 
   const constraintReady = !hasAnyConstraintRule || Boolean(eligibilityConstraint);
   // Searching should stay enabled even when it's not your turn; only selecting/confirming is gated by canPick.
@@ -529,9 +562,9 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
         onStartDraft={() => host.startDraft()}
       />
 
-      {lastError || joinError ? (
+      {lastError || joinError || staticTeamsError ? (
         <div className="rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300">
-          {lastError || joinError}
+          {lastError || joinError || staticTeamsError}
         </div>
       ) : null}
 

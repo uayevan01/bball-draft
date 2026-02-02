@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import desc, exists, func, select
+from sqlalchemy import desc, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -66,15 +66,14 @@ async def list_players(
             ) from exc
     stint_team_id_list = sorted(set(stint_team_id_list))
 
-    if stint_team_id_list:
+    if stint_team_id_list or stint_start_year is not None or stint_end_year is not None:
         # Use EXISTS instead of JOIN+DISTINCT to avoid Postgres DISTINCT/ORDER BY edge-cases
         # and keep search ordering stable.
         #
         # NOTE: build the EXISTS predicate directly to ensure it's correlated to Player.
-        stint_exists = exists().where(
-            PlayerTeamStint.player_id == Player.id,
-            PlayerTeamStint.team_id.in_(stint_team_id_list),
-        )
+        stint_exists = exists().where(PlayerTeamStint.player_id == Player.id)
+        if stint_team_id_list:
+            stint_exists = stint_exists.where(PlayerTeamStint.team_id.in_(stint_team_id_list))
         if stint_start_year is not None or stint_end_year is not None:
             start = stint_start_year if stint_start_year is not None else stint_end_year
             end = stint_end_year if stint_end_year is not None else stint_start_year

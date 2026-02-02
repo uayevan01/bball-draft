@@ -190,7 +190,15 @@ export function MainInfoCard({
                       {groupedSegments.map((segs, i) => (
                         <div key={i} className="flex items-center gap-2">
                           {segs.map((seg) => (
-                            <div key={seg.team.id} className="grid justify-items-center gap-1">
+                            <div
+                              key={seg.team.id}
+                              className="group relative grid justify-items-center gap-1"
+                              title={seg.team.name}
+                            >
+                              {/* Instant tooltip (avoid browser title delay) */}
+                              <div className="pointer-events-none absolute -top-2 left-1/2 z-20 hidden -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-md bg-zinc-950 px-2 py-1 text-[11px] font-semibold text-white shadow-md group-hover:block dark:bg-white dark:text-black">
+                                {seg.team.name}
+                              </div>
                               {seg.team.logo_url ? (
                                 <Image
                                   src={seg.team.logo_url}

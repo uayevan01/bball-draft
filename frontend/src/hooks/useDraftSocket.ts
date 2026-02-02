@@ -172,34 +172,22 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
       wsRef.current?.close();
       wsRef.current = null;
       // Clear state so disabled sockets can't "win" over the active socket in the UI.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
+      /* eslint-disable react-hooks/set-state-in-effect */
       setConnectedRoles([]);
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setFirstTurn(null);
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setCurrentTurn(null);
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setPicks([]);
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setLastError(null);
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setRollStage(null);
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setRollText(null);
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setRollStageDecadeLabel(null);
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setRollConstraint(null);
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setPendingSelection({ host: null, guest: null });
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setOnlyEligible(true);
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setDraftName(null);
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setMaxRerolls(0);
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setRerollsRemaining({ host: 0, guest: 0 });
+      /* eslint-enable react-hooks/set-state-in-effect */
       setStatus("disabled");
       return;
     }

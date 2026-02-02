@@ -135,7 +135,7 @@ export function PlayerPickerPanel({
       if (cached) {
         const ok = (cached.team_stints ?? []).some(
           (s) =>
-            teamIds.has(s.team_id) &&
+            (teamIds.size === 0 ||teamIds.has(s.team_id)) &&
             (constraint.yearStart == null ||
               constraint.yearEnd == null ||
               (s.start_year <= constraint.yearEnd && (s.end_year ?? 9999) >= constraint.yearStart)),
