@@ -50,7 +50,7 @@ export function DraftSideColumn({
             <div className="flex min-w-0 items-center gap-2">
               <span className="truncate text-sm font-semibold">{name}</span>
               {thisPlayerTurn ? (
-                <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-[12px] font-semibold text-white">CHOOSING</span>
+                <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-[12px] font-semibold text-white">SELECTING</span>
               ) : null}
             </div>
             <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{label}</div>
