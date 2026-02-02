@@ -12,12 +12,6 @@ export default async function DraftLobbyPage({ params }: Props) {
 
   return (
     <AppShell wide>
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-semibold tracking-tight">Draft lobby</h2>
-          <p className="mt-2 text-zinc-600 dark:text-zinc-300">Draft</p>
-        </div>
-      </div>
       <DraftLobbyClient draftRef={id} />
     </AppShell>
   );

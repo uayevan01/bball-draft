@@ -9,7 +9,6 @@ export function DraftLobbyHeader({
   onStartEdit,
   onCancelEdit,
   onSaveDraftName,
-  currentTurnText,
   showInvite,
   copied,
   onCopyDraftId,
@@ -26,7 +25,6 @@ export function DraftLobbyHeader({
   onCancelEdit: () => void;
   onSaveDraftName: () => void;
   draftPathText: string;
-  currentTurnText: string;
   showInvite: boolean;
   copied: boolean;
   draftId: string;
@@ -36,7 +34,7 @@ export function DraftLobbyHeader({
   onStartDraft: () => void;
 }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-black/10 bg-white px-4 py-3 dark:border-white/10 dark:bg-zinc-900/50">
+    <div className="flex flex-wrap items-center justify-between gap-3">
       <div className="flex flex-wrap items-center gap-3 text-sm">
         <div className="flex items-center gap-2">
           {isEditing ? (
@@ -64,16 +62,15 @@ export function DraftLobbyHeader({
             </>
           ) : (
             <>
-              <div className="text-sm font-semibold text-zinc-950 dark:text-white">{draftName || "Draft"}</div>
+              <div className="text-2xl font-semibold text-zinc-950 dark:text-white">{draftName || "Draft"}</div>
               {canRename ? (
-                <button type="button" onClick={onStartEdit} className="text-xs text-zinc-600 hover:underline dark:text-zinc-300">
-                  Rename
+                <button type="button" onClick={onStartEdit} className="text-2xl text-zinc-600 hover:underline dark:text-zinc-300 -scale-x-100">
+                  ✎
                 </button>
               ) : null}
             </>
           )}
         </div>
-        <div className="text-zinc-600 dark:text-zinc-300">{currentTurnText}</div>
       </div>
 
       <div className="flex items-center gap-3">

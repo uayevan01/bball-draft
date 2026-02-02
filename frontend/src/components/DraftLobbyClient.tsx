@@ -565,7 +565,6 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
           setDraftNameEditing(false);
         }}
         draftPathText={`/draft/${draft?.public_id ?? draftRef}`}
-        currentTurnText={draftComplete ? "Draft complete" : `Turn: ${currentTurn ?? "—"}`}
         showInvite={!isLocal}
         copied={copied}
         draftId={String(draft?.public_id ?? draftRef)}
