@@ -45,18 +45,6 @@ export function DraftRulesBuilder({
 
   return (
     <div className="mt-6 grid gap-6">
-      <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-black">
-        <div className="text-sm font-semibold">Supported rules</div>
-        <div className="mt-2 grid gap-1 text-sm text-zinc-600 dark:text-zinc-300">
-          <div>- Spin fields (year/team)</div>
-          <div>- Year restriction (any, decade, range, specific years)</div>
-          <div>- Team restriction (any, conference, division, specific teams)</div>
-          <div>- Player pool (active/retired)</div>
-          <div>- Rerolls + max rerolls</div>
-          <div>- Snake draft toggle</div>
-          <div>- Suggestions toggle</div>
-        </div>
-      </div>
 
       <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-black">
         <div className="text-sm font-semibold">Spin fields</div>
@@ -96,6 +84,31 @@ export function DraftRulesBuilder({
             />
             Spin a name-letter constraint each pick
           </label>
+          
+          {rules.spin_fields.includes("year") || rules.spin_fields.includes("team") || rules.spin_fields.includes("name_letter") ?  (
+            <>  {/* if spin fields are on, show reroll options */}
+          <label className="flex items-center gap-3 text-sm">
+            <input
+              type="checkbox"
+              checked={rules.allow_reroll}
+              onChange={(e) => onChange({ ...rules, allow_reroll: e.target.checked })}
+            />
+            Allow rerolls
+          </label>
+          <div className="grid gap-1 sm:max-w-xs">
+            <div className="text-xs text-zinc-600 dark:text-zinc-300">Max rerolls</div>
+            <input
+              className="h-10 rounded-xl border border-black/10 bg-white px-3 text-sm dark:border-white/10 dark:bg-black"
+              type="number"
+              min={0}
+              max={50}
+              value={rules.max_rerolls}
+              onChange={(e) => onChange({ ...rules, max_rerolls: Number(e.target.value) })}
+              disabled={!rules.allow_reroll}
+            />
+          </div>
+          </>
+          ) : null}
         </div>
       </div>
 
@@ -110,15 +123,15 @@ export function DraftRulesBuilder({
               let next: YearConstraint;
               if (t === "any") next = { type: "any", options: null };
               else if (t === "decade") next = { type: "decade", options: ["2000-2009"] };
-              else if (t === "range") next = { type: "range", options: { startYear: 1980, endYear: 2025 } };
-              else next = { type: "specific", options: [2003] };
+              else next = { type: "range", options: { startYear: 1980, endYear: 2025 } };
+              // else next = { type: "specific", options: [2003] };
               onChange({ ...rules, year_constraint: next });
             }}
           >
             <option value="any">Any year</option>
             <option value="decade">Decades</option>
             <option value="range">Range</option>
-            <option value="specific">Specific years</option>
+            {/* <option value="specific">Specific years</option> */}
           </select>
 
           {rules.year_constraint.type === "decade" ? (() => {
@@ -192,7 +205,7 @@ export function DraftRulesBuilder({
             );
           })() : null}
 
-          {rules.year_constraint.type === "specific" ? (
+          {/* {rules.year_constraint.type === "specific" ? (
             <div className="grid gap-1">
               <div className="text-xs text-zinc-600 dark:text-zinc-300">Comma-separated years</div>
               <input
@@ -208,7 +221,7 @@ export function DraftRulesBuilder({
                 placeholder="2003,2010,2018"
               />
             </div>
-          ) : null}
+          ) : null} */}
         </div>
       </div>
 
@@ -367,10 +380,9 @@ export function DraftRulesBuilder({
       </div>
 
       <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-black">
-        <div className="text-sm font-semibold">Draft mechanics</div>
+        <div className="text-sm font-semibold">Player restrictions</div>
         <div className="mt-3 grid gap-2">
-          <div className="mt-1 text-sm font-semibold">Player pool</div>
-          <label className="flex items-center gap-3 text-sm">
+        <label className="flex items-center gap-3 text-sm">
             <input
               type="checkbox"
               checked={rules.allow_active}
@@ -389,6 +401,12 @@ export function DraftRulesBuilder({
           {!rules.allow_active && !rules.allow_retired ? (
             <div className="text-xs text-red-700 dark:text-red-300">Warning: with both off, no players will be eligible.</div>
           ) : null}
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-black">
+        <div className="text-sm font-semibold">Draft mechanics</div>
+        <div className="mt-3 grid gap-2">
 
           <label className="flex items-center gap-3 text-sm">
             <input
@@ -406,26 +424,6 @@ export function DraftRulesBuilder({
             />
             Show player suggestions
           </label>
-          <label className="flex items-center gap-3 text-sm">
-            <input
-              type="checkbox"
-              checked={rules.allow_reroll}
-              onChange={(e) => onChange({ ...rules, allow_reroll: e.target.checked })}
-            />
-            Allow rerolls
-          </label>
-          <div className="grid gap-1 sm:max-w-xs">
-            <div className="text-xs text-zinc-600 dark:text-zinc-300">Max rerolls</div>
-            <input
-              className="h-10 rounded-xl border border-black/10 bg-white px-3 text-sm dark:border-white/10 dark:bg-black"
-              type="number"
-              min={0}
-              max={50}
-              value={rules.max_rerolls}
-              onChange={(e) => onChange({ ...rules, max_rerolls: Number(e.target.value) })}
-              disabled={!rules.allow_reroll}
-            />
-          </div>
         </div>
       </div>
 
