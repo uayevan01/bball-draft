@@ -161,7 +161,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
   const staticYear = useMemo(() => {
     const yc = rules?.year_constraint;
     if (!yc) return null;
-    if (yc.type === "any") return { label: "Any year" as const, start: null as number | null, end: null as number | null };
+    if (yc.type === "any") return { label: "No constraint" as const, start: null as number | null, end: null as number | null };
     if (yc.type === "range") return { label: `${yc.options.startYear}-${yc.options.endYear}`, start: yc.options.startYear, end: yc.options.endYear };
     if (yc.type === "decade" && yc.options?.length === 1) {
       const label = yc.options[0];
@@ -174,7 +174,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
       return { label: String(y), start: y, end: y };
     }
     // Multiple options without spin: treat as "any" for now (still eligible by team).
-    return { label: "Any year" as const, start: null as number | null, end: null as number | null };
+    return { label: "No constraint" as const, start: null as number | null, end: null as number | null };
   }, [rules]);
 
   // Resolve a fixed team constraint (e.g. Pacific division) to concrete team rows so we can filter eligibility.
@@ -276,7 +276,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
     const segments: ConstraintTeamSegment[] = staticTeams.map((t) => ({ team: t }));
     return {
       teams: needsTeams ? segments : [],
-      yearLabel: staticYear?.label ?? "Any year",
+      yearLabel: staticYear?.label ?? "No constraint",
       yearStart: staticYear?.start ?? null,
       yearEnd: staticYear?.end ?? null,
       nameLetter: staticNameLetter,

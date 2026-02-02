@@ -482,7 +482,7 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
             return
 
         # Sequential stages: each stage rolls ONE thing and persists it.
-        year_label: str = "Any year"
+        year_label: str = "No constraint"
         year_start: int | None = None
         year_end: int | None = None
         team_segments: list[dict] = []

@@ -222,7 +222,7 @@ export function MainInfoCard({
                         </div>
                       ))}
                     </div>
-                    <div className="text-base font-semibold text-zinc-700 dark:text-zinc-200">{constraint.yearLabel ?? "Any year"}</div>
+                    <div className="text-base font-semibold text-zinc-700 dark:text-zinc-200">{constraint.yearLabel ?? "No constraint"}</div>
                     {constraint.nameLetter ? (
                       <div className="text-sm font-semibold text-zinc-700 dark:text-zinc-200">
                         {(constraint.namePart ?? "first")} name starts with{" "}

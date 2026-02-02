@@ -321,7 +321,7 @@ export function PlayerPickerPanel({
                     ) : selectedEligibility ? (
                       <span className="text-emerald-700 dark:text-emerald-300">
                         Eligible for{" "}
-                        {(constraint.teams ?? []).map((t) => t.team.name).join(" / ") || "—"} • {constraint.yearLabel ?? "Any year"}
+                        {(constraint.teams ?? []).map((t) => t.team.name).join(" / ") || "—"} • {constraint.yearLabel ?? "No constraint"}
                       </span>
                     ) : (
                       <span className="text-red-700 dark:text-red-300">
