@@ -3,6 +3,10 @@ import { useEffect } from "react";
 export function HostSettingsModal({
   open,
   onClose,
+  showOnlyEligibleToggle,
+  onlyEligible,
+  onlyEligibleDisabled,
+  onOnlyEligibleChange,
   canForceReroll,
   onForceReroll,
   canUndoPick,
@@ -10,6 +14,10 @@ export function HostSettingsModal({
 }: {
   open: boolean;
   onClose: () => void;
+  showOnlyEligibleToggle?: boolean;
+  onlyEligible?: boolean;
+  onlyEligibleDisabled?: boolean;
+  onOnlyEligibleChange?: (v: boolean) => void;
   canForceReroll: boolean;
   onForceReroll: () => void;
   canUndoPick: boolean;
@@ -53,6 +61,24 @@ export function HostSettingsModal({
         </div>
 
         <div className="mt-4 grid gap-2">
+          {showOnlyEligibleToggle && typeof onlyEligible === "boolean" && onOnlyEligibleChange ? (
+            <label className="flex items-center justify-between gap-3 rounded-xl border border-black/10 bg-white px-3 py-2 text-sm text-zinc-800 dark:border-white/10 dark:bg-zinc-950/40 dark:text-zinc-200">
+              <div className="min-w-0">
+                <div className="font-semibold text-zinc-950 dark:text-white">Only eligible players</div>
+                <div className="text-xs text-zinc-600 dark:text-zinc-300">
+                  Filters search results to players that match the current constraint.
+                </div>
+              </div>
+              <input
+                type="checkbox"
+                checked={onlyEligible}
+                disabled={onlyEligibleDisabled}
+                onChange={(e) => onOnlyEligibleChange(e.target.checked)}
+                className="h-4 w-4"
+              />
+            </label>
+          ) : null}
+
           <button
             type="button"
             className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm font-medium text-zinc-900 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:bg-zinc-950/40 dark:text-zinc-100 dark:hover:bg-zinc-950/60"

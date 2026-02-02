@@ -588,6 +588,10 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
       <HostSettingsModal
         open={hostSettingsModalOpen}
         onClose={() => setHostSettingsModalOpen(false)}
+        showOnlyEligibleToggle={hasAnyConstraintRule}
+        onlyEligible={onlyEligible}
+        onlyEligibleDisabled={hostAdminDisabled}
+        onOnlyEligibleChange={(v) => host.setOnlyEligiblePlayers(v)}
         canForceReroll={canForceReroll}
         onForceReroll={() => {
           const ok = window.confirm(
@@ -681,7 +685,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
             currentTurn={currentTurn}
             isLocal={isLocal}
             onlyEligible={onlyEligible}
-            showOnlyEligibleToggle={hasAnyConstraintRule && (isLocal || effectiveRole === "host")}
+          showOnlyEligibleToggle={false}
             onOnlyEligibleChange={(v) => host.setOnlyEligiblePlayers(v)}
             constraint={eligibilityConstraint}
             pendingSelection={pendingSelection ?? { host: null, guest: null }}
