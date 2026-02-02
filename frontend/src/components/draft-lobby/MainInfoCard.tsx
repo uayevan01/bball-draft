@@ -114,7 +114,9 @@ export function MainInfoCard({
                       type="button"
                       onClick={onRoll}
                       disabled={rollDisabled}
-                      className="h-10 rounded-full bg-zinc-950 px-5 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-60 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
+                      className={`h-10 rounded-full bg-zinc-950 px-5 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-60 dark:bg-white dark:text-black dark:hover:bg-zinc-200 transition-transform will-change-transform ${
+                        rollDisabled ? "" : "subtle-pulse"
+                      }`}
                     >
                       {rollButtonLabel}
                     </button>
@@ -234,7 +236,9 @@ export function MainInfoCard({
                       type="button"
                       onClick={onRoll}
                       disabled={rollDisabled}
-                      className="h-12 w-full max-w-sm rounded-full bg-zinc-950 px-8 text-base font-semibold text-white hover:bg-zinc-800 disabled:opacity-60 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
+                      className={`h-12 w-full max-w-sm rounded-full bg-zinc-950 px-8 text-base font-semibold text-white hover:bg-zinc-800 disabled:opacity-60 dark:bg-white dark:text-black dark:hover:bg-zinc-200 transition-transform will-change-transform ${
+                        rollDisabled ? "" : "subtle-pulse"
+                      }`}
                     >
                       {rollButtonLabel}
                     </button>

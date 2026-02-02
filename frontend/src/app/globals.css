@@ -28,3 +28,23 @@ body {
 button {
   cursor: pointer;
 }
+
+@keyframes subtle-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.03);
+  }
+}
+
+.subtle-pulse {
+  animation: subtle-pulse 1.9s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .subtle-pulse {
+    animation: none;
+  }
+}
