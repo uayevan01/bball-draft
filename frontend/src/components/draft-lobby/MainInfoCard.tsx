@@ -5,7 +5,6 @@ import Image from "next/image";
 import type { EligibilityConstraint, SpinPreviewTeam } from "./types";
 
 export function MainInfoCard({
-  currentTurnName,
   isLocal,
   infoMessage,
   draftComplete,
@@ -44,7 +43,7 @@ export function MainInfoCard({
   const segments = constraint?.teams ?? [];
   const segmentCount = segments.length;
   const showNames = segmentCount <= 4;
-  const sizePx = segmentCount <= 2 ? 72 : segmentCount <= 4 ? 56 : segmentCount <= 8 ? 44 : 36;
+  const sizePx = segmentCount <= 2 ? 96 : segmentCount <= 4 ? 72 : segmentCount <= 8 ? 56 : 44;
 
   function resolveFranchiseRootId(teamId: number, byId: Map<number, { previous_team_id?: number | null }>): number {
     let cur = teamId;
@@ -87,35 +86,27 @@ export function MainInfoCard({
 
   return (
     <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-900/50">
-      <div className="grid gap-3">
-        <div className="min-w-0 text-center md:text-left">
-          <div className="flex items-baseline justify-between gap-3">
-            <div className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">{draftComplete ? "Draft" : "Current turn"}</div>
-            {!draftComplete && infoMessage ? (
-              <div className="max-w-[60%] truncate text-xs font-medium text-zinc-600 dark:text-zinc-300">
-                {infoMessage}
-              </div>
-            ) : (
-              // Keep the row height stable even when the ephemeral message isn't shown.
-              <div className="max-w-[60%] truncate text-xs font-medium text-transparent select-none">.</div>
-            )}
-          </div>
-          <div className="mt-1 text-sm font-semibold text-zinc-950 dark:text-white">
-            {draftComplete ? "Draft Complete" : currentTurnName}
-            {isLocal ? <span className="ml-2 text-xs font-normal text-zinc-500 dark:text-zinc-400">(local)</span> : null}
+      {/* NOTE: Intentionally hiding "Current turn" + whose turn it is for now (redundant with other UI). */}
+      {draftComplete ? (
+        <div className="grid gap-3">
+          <div className="min-w-0 text-center md:text-left">
+            <div className="mt-1 text-sm font-semibold text-zinc-950 dark:text-white">
+              Draft Complete
+              {isLocal ? <span className="ml-2 text-xs font-normal text-zinc-500 dark:text-zinc-400">(local)</span> : null}
+            </div>
           </div>
         </div>
-      </div>
+      ) : null}
 
       {!draftComplete && showConstraint ? (
-        <div className="mt-4 flex justify-center">
+        <div className="mt-4">
           {(() => {
             const showBigRoll = !isSpinning && !constraint && showRollButton && canRoll;
             const showWaiting = !isSpinning && !constraint && showRollButton && !canRoll;
             const showRerollOverlay = !isSpinning && Boolean(constraint) && showRollButton && canRoll;
 
             return (
-              <div className="relative w-full max-w-3xl min-h-[120px] rounded-2xl border border-black/10 bg-black/5 px-5 py-4 text-center dark:border-white/10 dark:bg-white/10">
+              <div className="relative w-full min-h-[120px] rounded-2xl px-5 py-4 text-center">
                 {/* Reroll lives as an overlay when a constraint exists */}
                 {showRerollOverlay ? (
                   <div className="absolute right-4 top-4">
@@ -137,9 +128,9 @@ export function MainInfoCard({
                       <Image
                         src={spinPreviewTeam.logo_url}
                         alt={spinPreviewTeam.name}
-                        width={64}
-                        height={64}
-                        className="h-16 w-16 rounded-xl object-contain"
+                        width={96}
+                        height={96}
+                        className="h-24 w-24 object-contain"
                       />
                     ) : rollStage === "spinning_letter" && constraint?.teams?.length ? (
                       (() => {
@@ -147,13 +138,13 @@ export function MainInfoCard({
                         const logo = seg?.team?.logo_url ?? null;
                         const name = seg?.team?.name ?? "Team";
                         return logo ? (
-                          <Image src={logo} alt={name} width={64} height={64} className="h-16 w-16 rounded-xl object-contain" />
+                          <Image src={logo} alt={name} width={96} height={96} className="h-24 w-24 object-contain" />
                         ) : (
-                          <div className="h-16 w-16 rounded-xl border border-black/10 bg-white/60 dark:border-white/10 dark:bg-zinc-900/60" />
+                          <div className="h-24 w-24" />
                         );
                       })()
                     ) : (
-                      <div className="h-16 w-16 rounded-xl border border-black/10 bg-white/60 dark:border-white/10 dark:bg-zinc-900/60" />
+                      <div className="h-24 w-24" />
                     )}
                     <div className="text-xs font-semibold tracking-wide text-zinc-600 dark:text-zinc-300">
                       {rollStage === "spinning_decade"
@@ -260,6 +251,13 @@ export function MainInfoCard({
               </div>
             );
           })()}
+        </div>
+      ) : null}
+
+      {/* Ephemeral info message (moved to bottom, under constraints) */}
+      {!draftComplete && infoMessage ? (
+        <div className="mt-3 text-center text-xs font-medium text-zinc-600 dark:text-zinc-300">
+          {infoMessage}
         </div>
       ) : null}
     </div>

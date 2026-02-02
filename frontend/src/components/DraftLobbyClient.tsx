@@ -546,7 +546,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
   const canUndoPick = picks.length > 0 && !hostAdminDisabled;
 
   return (
-    <div className="mt-6 grid gap-4">
+    <div className="grid gap-4">
       <DraftLobbyHeader
         draftName={draftName}
         canRename={isLocal || effectiveRole === "host"}
@@ -625,9 +625,6 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
 
           {hostSettingsOpen ? (
             <div className="mt-3 grid gap-2">
-              <div className="text-xs text-zinc-600 dark:text-zinc-400">
-                These are host-only safety controls for edge cases and misclicks.
-              </div>
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
