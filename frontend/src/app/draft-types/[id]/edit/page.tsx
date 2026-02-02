@@ -37,7 +37,7 @@ export default function DraftTypeEditPage() {
           setName(dt.name ?? "");
           setDescription(dt.description ?? "");
           setIsPublic(Boolean(dt.is_public));
-          setRules((dt.rules as DraftRules) ?? defaultDraftRules());
+          setRules({ ...defaultDraftRules(), ...((dt.rules as Partial<DraftRules>) ?? {}) });
         }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load draft type.");

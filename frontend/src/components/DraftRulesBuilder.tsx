@@ -51,6 +51,7 @@ export function DraftRulesBuilder({
           <div>- Spin fields (year/team)</div>
           <div>- Year restriction (any, decade, range, specific years)</div>
           <div>- Team restriction (any, conference, division, specific teams)</div>
+          <div>- Player pool (active/retired)</div>
           <div>- Rerolls + max rerolls</div>
           <div>- Snake draft toggle</div>
           <div>- Suggestions toggle</div>
@@ -368,6 +369,27 @@ export function DraftRulesBuilder({
       <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-black">
         <div className="text-sm font-semibold">Draft mechanics</div>
         <div className="mt-3 grid gap-2">
+          <div className="mt-1 text-sm font-semibold">Player pool</div>
+          <label className="flex items-center gap-3 text-sm">
+            <input
+              type="checkbox"
+              checked={rules.allow_active}
+              onChange={(e) => onChange({ ...rules, allow_active: e.target.checked })}
+            />
+            Allow active (unretired) players
+          </label>
+          <label className="flex items-center gap-3 text-sm">
+            <input
+              type="checkbox"
+              checked={rules.allow_retired}
+              onChange={(e) => onChange({ ...rules, allow_retired: e.target.checked })}
+            />
+            Allow retired players
+          </label>
+          {!rules.allow_active && !rules.allow_retired ? (
+            <div className="text-xs text-red-700 dark:text-red-300">Warning: with both off, no players will be eligible.</div>
+          ) : null}
+
           <label className="flex items-center gap-3 text-sm">
             <input
               type="checkbox"

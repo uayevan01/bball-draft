@@ -52,6 +52,7 @@ export function PlayerPickerPanel({
   const [searchErrorLocal, setSearchErrorLocal] = useState<string | null>(null);
   const [selected, setSelected] = useState<PlayerSearchResult | null>(null);
   const [selectedEligibility, setSelectedEligibility] = useState<boolean | null>(null);
+  const [selectedRetired, setSelectedRetired] = useState<boolean | null>(null);
   const detailsCacheRef = useRef<Record<number, PlayerDetail | undefined>>({});
 
   useEffect(() => {
@@ -79,6 +80,8 @@ export function PlayerPickerPanel({
             params.set("name_letters", String(constraint.nameLetter));
             params.set("name_part", String(constraint.namePart ?? "first"));
           }
+          if (constraint.allowActive === false) params.set("include_active", "false");
+          if (constraint.allowRetired === false) params.set("include_retired", "false");
         }
         const token = await getToken().catch(() => null);
         const data = await backendGet<PlayerSearchResult[]>(`/players?${params.toString()}`, token);
@@ -116,6 +119,7 @@ export function PlayerPickerPanel({
     let cancelled = false;
     async function run() {
       setSelectedEligibility(null);
+      setSelectedRetired(null);
       if (!selected) return;
       if (drafted(selected.id)) {
         setSelectedEligibility(false);
@@ -125,22 +129,35 @@ export function PlayerPickerPanel({
         setSelectedEligibility(true);
         return;
       }
-      if (onlyEligible) {
+
+      const allowActive = constraint.allowActive !== false;
+      const allowRetired = constraint.allowRetired !== false;
+      const needsRetiredCheck = !(allowActive && allowRetired);
+      const needsStintCheck = !onlyEligible && Boolean(constraint) && (constraint.teams?.length || (constraint.yearStart != null && constraint.yearEnd != null));
+
+      // If we don't need any detail-based checks, we're done.
+      if (!needsRetiredCheck && !needsStintCheck) {
         setSelectedEligibility(true);
         return;
       }
 
-      const teamIds = new Set((constraint.teams ?? []).map((t) => t.team.id));
       const cached = detailsCacheRef.current[selected.id];
       if (cached) {
-        const ok = (cached.team_stints ?? []).some(
-          (s) =>
-            (teamIds.size === 0 ||teamIds.has(s.team_id)) &&
-            (constraint.yearStart == null ||
-              constraint.yearEnd == null ||
-              (s.start_year <= constraint.yearEnd && (s.end_year ?? 9999) >= constraint.yearStart)),
-        );
-        setSelectedEligibility(ok);
+        setSelectedRetired(cached.retirement_year != null);
+        if (!onlyEligible) {
+          const teamIds = new Set((constraint.teams ?? []).map((t) => t.team.id));
+          const ok = (cached.team_stints ?? []).some(
+            (s) =>
+              (teamIds.size === 0 || teamIds.has(s.team_id)) &&
+              (constraint.yearStart == null ||
+                constraint.yearEnd == null ||
+                (s.start_year <= constraint.yearEnd &&
+                  (s.end_year ?? cached.retirement_year ?? 9999) >= constraint.yearStart)),
+          );
+          setSelectedEligibility(ok);
+        } else {
+          setSelectedEligibility(true);
+        }
         return;
       }
 
@@ -149,16 +166,26 @@ export function PlayerPickerPanel({
         const detail = await backendGet<PlayerDetail>(`/players/${selected.id}/details`, token);
         detailsCacheRef.current[selected.id] = detail;
         if (cancelled) return;
-        const ok = (detail.team_stints ?? []).some(
-          (s) =>
-            teamIds.has(s.team_id) &&
-            (constraint.yearStart == null ||
-              constraint.yearEnd == null ||
-              (s.start_year <= constraint.yearEnd && (s.end_year ?? 9999) >= constraint.yearStart)),
-        );
-        setSelectedEligibility(ok);
+        setSelectedRetired(detail.retirement_year != null);
+        if (!onlyEligible) {
+          const teamIds = new Set((constraint.teams ?? []).map((t) => t.team.id));
+          const ok = (detail.team_stints ?? []).some(
+            (s) =>
+              (teamIds.size === 0 || teamIds.has(s.team_id)) &&
+              (constraint.yearStart == null ||
+                constraint.yearEnd == null ||
+                (s.start_year <= constraint.yearEnd &&
+                  (s.end_year ?? detail.retirement_year ?? 9999) >= constraint.yearStart)),
+          );
+          setSelectedEligibility(ok);
+        } else {
+          setSelectedEligibility(true);
+        }
       } catch {
-        if (!cancelled) setSelectedEligibility(false);
+        if (!cancelled) {
+          setSelectedRetired(null);
+          setSelectedEligibility(false);
+        }
       }
     }
     run();
@@ -175,6 +202,17 @@ export function PlayerPickerPanel({
     if (drafted(selected.id)) return false;
     // Constraint can be null when the draft type has no eligibility restrictions (no roll + any team/year/letter).
     // In that case, allow the pick.
+    if (constraint) {
+      const allowActive = constraint.allowActive !== false;
+      const allowRetired = constraint.allowRetired !== false;
+      if (!allowActive && !allowRetired) return false;
+      if (!allowActive || !allowRetired) {
+        // If pool is restricted and we don't know yet, block confirm until details arrive.
+        if (selectedRetired == null) return false;
+        if (!allowRetired && selectedRetired) return false;
+        if (!allowActive && !selectedRetired) return false;
+      }
+    }
     if (constraint?.nameLetter) {
       const part = (constraint.namePart ?? "first") as "first" | "last" | "either";
       if (!matchesNameLetter(selected.name, constraint.nameLetter, part)) return false;
@@ -183,7 +221,7 @@ export function PlayerPickerPanel({
       return selectedEligibility === true;
     }
     return true;
-  }, [started, selected, canPick, isSpinning, drafted, constraint, onlyEligible, selectedEligibility]);
+  }, [started, selected, canPick, isSpinning, drafted, constraint, onlyEligible, selectedEligibility, selectedRetired]);
 
   return (
     <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-900/50">
@@ -277,6 +315,24 @@ export function PlayerPickerPanel({
                     ) : (
                       <span className="text-red-700 dark:text-red-300">
                         Name must match: {(constraint.namePart ?? "first")} name starts with {constraint.nameLetter.toUpperCase()}
+                      </span>
+                    )}
+                  </div>
+                ) : null}
+
+                {constraint && selected && (constraint.allowActive === false || constraint.allowRetired === false) ? (
+                  <div className="mt-2 text-xs">
+                    {selectedRetired == null ? (
+                      <span className="text-zinc-600 dark:text-zinc-300">Checking retired status…</span>
+                    ) : (constraint.allowRetired === false && selectedRetired) || (constraint.allowActive === false && !selectedRetired) ? (
+                      <span className="text-red-700 dark:text-red-300">
+                        {constraint.allowRetired === false && selectedRetired
+                          ? "Retired players are disabled for this draft type."
+                          : "Active (unretired) players are disabled for this draft type."}
+                      </span>
+                    ) : (
+                      <span className="text-emerald-700 dark:text-emerald-300">
+                        {selectedRetired ? "Retired player allowed." : "Active player allowed."}
                       </span>
                     )}
                   </div>

@@ -40,6 +40,8 @@ export type EligibilityConstraint = {
   yearEnd?: number | null;
   nameLetter?: string | null;
   namePart?: "first" | "last" | "either" | null;
+  allowActive?: boolean | null;
+  allowRetired?: boolean | null;
 };
 
 export type SpinPreviewTeam = {
@@ -55,6 +57,7 @@ export type PlayerDetail = {
   name: string;
   image_url?: string | null;
   position?: string | null;
+  retirement_year?: number | null;
   team_stints?: Array<{
     id: number;
     team_id: number;

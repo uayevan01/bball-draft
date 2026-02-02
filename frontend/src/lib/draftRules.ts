@@ -23,6 +23,8 @@ export type DraftRules = {
   name_letter_constraint: NameLetterConstraint;
   name_letter_part: NameLetterPart;
   name_letter_min_options: number; // for spinner: minimum number of viable letters (>=1)
+  allow_active: boolean;
+  allow_retired: boolean;
   allow_reroll: boolean;
   max_rerolls: number;
   snake_draft: boolean;
@@ -41,6 +43,8 @@ export function defaultDraftRules(): DraftRules {
     name_letter_constraint: { type: "any", options: null },
     name_letter_part: "first",
     name_letter_min_options: 1,
+    allow_active: true,
+    allow_retired: true,
     allow_reroll: true,
     max_rerolls: 3,
     snake_draft: true,
@@ -77,6 +81,13 @@ export function summarizeRules(rules: Partial<DraftRules> | undefined): string {
     if (nc.type === "any") parts.push("name:any");
     if (nc.type === "specific") parts.push(`name:${nc.options.join(",") || "letter"}`);
     if (np) parts.push(`part:${np}`);
+  }
+
+  if (typeof rules.allow_active === "boolean" || typeof rules.allow_retired === "boolean") {
+    const a = rules.allow_active !== false;
+    const r = rules.allow_retired !== false;
+    const label = a && r ? "any" : a ? "active" : r ? "retired" : "none";
+    parts.push(`pool:${label}`);
   }
 
   if (typeof rules.allow_reroll === "boolean") {

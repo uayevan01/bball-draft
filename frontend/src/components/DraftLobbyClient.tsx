@@ -246,14 +246,23 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
     usesRoll ||
       (rules?.team_constraint && rules.team_constraint.type !== "any") ||
       (rules?.year_constraint && rules.year_constraint.type !== "any") ||
-      (rules?.name_letter_constraint && rules.name_letter_constraint.type !== "any"),
+      (rules?.name_letter_constraint && rules.name_letter_constraint.type !== "any") ||
+      rules?.allow_active === false ||
+      rules?.allow_retired === false,
   );
+
+  const allowActiveRule = rules?.allow_active ?? true;
+  const allowRetiredRule = rules?.allow_retired ?? true;
 
   const eligibilityConstraint = useMemo<EligibilityConstraint | null>(() => {
     if (!started) return null;
     if (usesRoll) {
       if (!rollConstraint) return null;
-      return rollConstraint;
+      return {
+        ...(rollConstraint as EligibilityConstraint),
+        allowActive: allowActiveRule,
+        allowRetired: allowRetiredRule,
+      };
     }
     const needsTeams = Boolean(staticTeamConstraint);
     if (needsTeams && !staticTeams.length) return null;
@@ -265,8 +274,21 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
       yearEnd: staticYear?.end ?? null,
       nameLetter: staticNameLetter,
       namePart: staticNamePart,
-    }
-  }, [started, usesRoll, rollConstraint, staticTeams, staticTeamConstraint, staticYear, staticNameLetter, staticNamePart]);
+      allowActive: allowActiveRule,
+      allowRetired: allowRetiredRule,
+    };
+  }, [
+    started,
+    usesRoll,
+    rollConstraint,
+    staticTeams,
+    staticTeamConstraint,
+    staticYear,
+    staticNameLetter,
+    staticNamePart,
+    allowActiveRule,
+    allowRetiredRule,
+  ]);
 
   const constraintReady = !hasAnyConstraintRule || Boolean(eligibilityConstraint);
   // Searching should stay enabled even when it's not your turn; only selecting/confirming is gated by canPick.

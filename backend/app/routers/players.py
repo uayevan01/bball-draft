@@ -32,6 +32,8 @@ async def list_players(
         default="first",
         description='Which name part to apply name_letters to: "first", "last", or "either".',
     ),
+    include_active: bool | None = Query(default=None, description="Include active/unretired players"),
+    include_retired: bool | None = Query(default=None, description="Include retired players"),
     stint_start_year: int | None = Query(default=None, description="Filter by stint overlap start year (inclusive)"),
     stint_end_year: int | None = Query(default=None, description="Filter by stint overlap end year (inclusive)"),
     limit: int = Query(default=50, ge=1, le=200),
@@ -49,6 +51,14 @@ async def list_players(
         stmt = stmt.where(Player.draft_year == draft_year)
     if team_id is not None:
         stmt = stmt.where(Player.team_id == team_id)
+
+    # Retired/active filtering (optional)
+    if include_active is False and include_retired is False:
+        return []
+    if include_active is False:
+        stmt = stmt.where(Player.retirement_year.is_not(None))
+    elif include_retired is False:
+        stmt = stmt.where(Player.retirement_year.is_(None))
     stint_team_id_list: list[int] = []
     if stint_team_id is not None:
         stint_team_id_list.append(stint_team_id)
@@ -80,7 +90,9 @@ async def list_players(
             assert start is not None and end is not None
             stint_exists = stint_exists.where(
                 PlayerTeamStint.start_year <= end,
-                func.coalesce(PlayerTeamStint.end_year, current_year) >= start,
+                # If stint end_year is missing, treat it as the player's retirement_year (if any),
+                # otherwise fall back to current_year for active players.
+                func.coalesce(PlayerTeamStint.end_year, Player.retirement_year, current_year) >= start,
             )
         stmt = stmt.where(stint_exists)
 
