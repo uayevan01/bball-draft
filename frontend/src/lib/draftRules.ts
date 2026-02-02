@@ -25,6 +25,9 @@ export type DraftRules = {
   name_letter_min_options: number; // for spinner: minimum number of viable letters (>=1)
   allow_active: boolean;
   allow_retired: boolean;
+  // Player constraint: number of team stints in career (consecutive same-franchise stints coalesce).
+  min_team_stints: number | null;
+  max_team_stints: number | null;
   allow_reroll: boolean;
   max_rerolls: number;
   snake_draft: boolean;
@@ -45,6 +48,8 @@ export function defaultDraftRules(): DraftRules {
     name_letter_min_options: 1,
     allow_active: true,
     allow_retired: true,
+    min_team_stints: null,
+    max_team_stints: null,
     allow_reroll: true,
     max_rerolls: 3,
     snake_draft: true,
@@ -93,6 +98,8 @@ export function summarizeRules(rules: Partial<DraftRules> | undefined): string {
   if (typeof rules.allow_reroll === "boolean") {
     parts.push(`reroll:${rules.allow_reroll ? `yes(${rules.max_rerolls ?? 0})` : "no"}`);
   }
+  if (typeof rules.min_team_stints === "number") parts.push(`stints:≥${rules.min_team_stints}`);
+  if (typeof rules.max_team_stints === "number") parts.push(`stints:≤${rules.max_team_stints}`);
   if (typeof rules.snake_draft === "boolean") parts.push(`snake:${rules.snake_draft ? "yes" : "no"}`);
   if (typeof rules.show_suggestions === "boolean") parts.push(`suggest:${rules.show_suggestions ? "yes" : "no"}`);
 

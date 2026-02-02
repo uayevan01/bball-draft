@@ -248,12 +248,16 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
       (rules?.team_constraint && rules.team_constraint.type !== "any") ||
       (rules?.year_constraint && rules.year_constraint.type !== "any") ||
       (rules?.name_letter_constraint && rules.name_letter_constraint.type !== "any") ||
+      typeof rules?.min_team_stints === "number" ||
+      typeof rules?.max_team_stints === "number" ||
       rules?.allow_active === false ||
       rules?.allow_retired === false,
   );
 
   const allowActiveRule = rules?.allow_active ?? true;
   const allowRetiredRule = rules?.allow_retired ?? true;
+  const minTeamStintsRule = rules?.min_team_stints ?? null;
+  const maxTeamStintsRule = rules?.max_team_stints ?? null;
 
   const eligibilityConstraint = useMemo<EligibilityConstraint | null>(() => {
     if (!started) return null;
@@ -263,6 +267,8 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
         ...(rollConstraint as EligibilityConstraint),
         allowActive: allowActiveRule,
         allowRetired: allowRetiredRule,
+        minTeamStints: minTeamStintsRule,
+        maxTeamStints: maxTeamStintsRule,
       };
     }
     const needsTeams = Boolean(staticTeamConstraint);
@@ -277,6 +283,8 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
       namePart: staticNamePart,
       allowActive: allowActiveRule,
       allowRetired: allowRetiredRule,
+      minTeamStints: minTeamStintsRule,
+      maxTeamStints: maxTeamStintsRule,
     };
   }, [
     started,
@@ -289,6 +297,8 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
     staticNamePart,
     allowActiveRule,
     allowRetiredRule,
+    minTeamStintsRule,
+    maxTeamStintsRule,
   ]);
 
   const constraintReady = !hasAnyConstraintRule || Boolean(eligibilityConstraint);

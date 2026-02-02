@@ -8,10 +8,41 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.database import get_db
-from app.models import Player, PlayerTeamStint
+from app.models import Player, PlayerTeamStint, Team
 from app.schemas.player import PlayerDetailOut, PlayerOut
 
 router = APIRouter(prefix="/players", tags=["players"])
+
+
+def _team_franchise_root_id(team_id: int, prev_by_id: dict[int, int | None]) -> int:
+    """
+    Follow Team.previous_team_id links to get a stable franchise root id.
+    Includes cycle protection.
+    """
+    cur = team_id
+    seen: set[int] = set()
+    while cur not in seen:
+        seen.add(cur)
+        prev = prev_by_id.get(cur)
+        if not prev:
+            break
+        cur = prev
+    return cur
+
+
+def _coalesced_team_stint_count(*, stint_team_ids_in_order: list[int], prev_by_id: dict[int, int | None]) -> int:
+    """
+    Count stints after coalescing consecutive stints that belong to the same franchise.
+    Example: SEA->OKC with no other team between counts as 1.
+    """
+    last_root: int | None = None
+    count = 0
+    for team_id in stint_team_ids_in_order:
+        root = _team_franchise_root_id(team_id, prev_by_id)
+        if last_root is None or root != last_root:
+            count += 1
+            last_root = root
+    return count
 
 
 @router.get("", response_model=list[PlayerOut])
@@ -36,6 +67,8 @@ async def list_players(
     include_retired: bool | None = Query(default=None, description="Include retired players"),
     stint_start_year: int | None = Query(default=None, description="Filter by stint overlap start year (inclusive)"),
     stint_end_year: int | None = Query(default=None, description="Filter by stint overlap end year (inclusive)"),
+    min_team_stints: int | None = Query(default=None, ge=0, description="Minimum number of team stints (coalescing consecutive same-franchise stints)"),
+    max_team_stints: int | None = Query(default=None, ge=0, description="Maximum number of team stints (coalescing consecutive same-franchise stints)"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
@@ -112,11 +145,75 @@ async def list_players(
             else:
                 stmt = stmt.where(first_letter.in_(letters))
     # Default ordering: Hall of Fame first, then longest career.
-    stmt = (
-        stmt.order_by(desc(Player.hall_of_fame), desc(career_len), Player.name)
-        .limit(limit)
-        .offset(offset)
-    )
+    stmt = stmt.order_by(desc(Player.hall_of_fame), desc(career_len), Player.name)
+
+    # Optional stint-count filtering (requires coalescing by franchise root).
+    # We implement this with an ordered over-fetch loop so pagination stays stable.
+    if min_team_stints is not None or max_team_stints is not None:
+        if min_team_stints is not None and max_team_stints is not None and min_team_stints > max_team_stints:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="min_team_stints cannot exceed max_team_stints")
+
+        # Load team->previous mapping once (teams table is small).
+        team_rows = (await db.execute(select(Team.id, Team.previous_team_id))).all()
+        prev_by_id: dict[int, int | None] = {int(tid): (int(prev) if prev is not None else None) for (tid, prev) in team_rows}
+
+        # Reuse the same filters + ordering, but only select Player.id (for cheap pagination + stint-count filtering).
+        base_ids_stmt = stmt.with_only_columns(Player.id, maintain_column_froms=True)
+
+        want = offset + limit
+        matched_ids: list[int] = []
+        batch_size = 500
+        base_offset = 0
+        safety_iters = 0
+
+        while len(matched_ids) < want and safety_iters < 20:
+            safety_iters += 1
+            id_rows = (await db.execute(base_ids_stmt.limit(batch_size).offset(base_offset))).all()
+            if not id_rows:
+                break
+            batch_ids = [int(r[0]) for r in id_rows]
+            base_offset += len(batch_ids)
+
+            # Pull stints for this batch, ordered by player then start_year.
+            stint_rows = (
+                await db.execute(
+                    select(PlayerTeamStint.player_id, PlayerTeamStint.team_id)
+                    .where(PlayerTeamStint.player_id.in_(batch_ids))
+                    .order_by(PlayerTeamStint.player_id.asc(), PlayerTeamStint.start_year.asc())
+                )
+            ).all()
+
+            # Compute coalesced counts in a single pass.
+            counts: dict[int, int] = {pid: 0 for pid in batch_ids}
+            cur_pid: int | None = None
+            last_root: int | None = None
+            for pid_raw, team_id_raw in stint_rows:
+                pid = int(pid_raw)
+                team_id = int(team_id_raw)
+                if cur_pid != pid:
+                    cur_pid = pid
+                    last_root = None
+                root = _team_franchise_root_id(team_id, prev_by_id)
+                if last_root is None or root != last_root:
+                    counts[pid] = counts.get(pid, 0) + 1
+                    last_root = root
+
+            for pid in batch_ids:
+                c = counts.get(pid, 0)
+                if min_team_stints is not None and c < min_team_stints:
+                    continue
+                if max_team_stints is not None and c > max_team_stints:
+                    continue
+                matched_ids.append(pid)
+
+        selected = matched_ids[offset: offset + limit]
+        if not selected:
+            return []
+        players = (await db.execute(select(Player).where(Player.id.in_(selected)))).scalars().all()
+        by_id = {p.id: p for p in players}
+        return [by_id[i] for i in selected if i in by_id]
+
+    stmt = stmt.limit(limit).offset(offset)
     return (await db.execute(stmt)).scalars().all()
 
 
@@ -138,6 +235,15 @@ async def get_player_details(player_id: int, db: AsyncSession = Depends(get_db))
     player = (await db.execute(stmt)).unique().scalar_one_or_none()
     if not player:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Player not found")
-    return player
+    # Compute coalesced team-stint count (coalesce consecutive same-franchise stints).
+    team_rows = (await db.execute(select(Team.id, Team.previous_team_id))).all()
+    prev_by_id: dict[int, int | None] = {int(tid): (int(prev) if prev is not None else None) for (tid, prev) in team_rows}
+    stints_sorted = sorted(list(player.team_stints or []), key=lambda s: (s.start_year, s.id))
+    stint_team_ids = [int(s.team_id) for s in stints_sorted]
+    count = _coalesced_team_stint_count(stint_team_ids_in_order=stint_team_ids, prev_by_id=prev_by_id)
+
+    out = PlayerDetailOut.model_validate(player)
+    out.coalesced_team_stint_count = count
+    return out
 
 

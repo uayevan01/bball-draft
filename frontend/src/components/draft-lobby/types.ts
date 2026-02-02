@@ -42,6 +42,8 @@ export type EligibilityConstraint = {
   namePart?: "first" | "last" | "either" | null;
   allowActive?: boolean | null;
   allowRetired?: boolean | null;
+  minTeamStints?: number | null;
+  maxTeamStints?: number | null;
 };
 
 export type SpinPreviewTeam = {
@@ -58,6 +60,7 @@ export type PlayerDetail = {
   image_url?: string | null;
   position?: string | null;
   retirement_year?: number | null;
+  coalesced_team_stint_count?: number | null;
   team_stints?: Array<{
     id: number;
     team_id: number;

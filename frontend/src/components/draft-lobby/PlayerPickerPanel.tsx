@@ -82,6 +82,8 @@ export function PlayerPickerPanel({
           }
           if (constraint.allowActive === false) params.set("include_active", "false");
           if (constraint.allowRetired === false) params.set("include_retired", "false");
+          if (constraint.minTeamStints != null) params.set("min_team_stints", String(constraint.minTeamStints));
+          if (constraint.maxTeamStints != null) params.set("max_team_stints", String(constraint.maxTeamStints));
         }
         const token = await getToken().catch(() => null);
         const data = await backendGet<PlayerSearchResult[]>(`/players?${params.toString()}`, token);
@@ -133,10 +135,13 @@ export function PlayerPickerPanel({
       const allowActive = constraint.allowActive !== false;
       const allowRetired = constraint.allowRetired !== false;
       const needsRetiredCheck = !(allowActive && allowRetired);
-      const needsStintCheck = !onlyEligible && Boolean(constraint) && (constraint.teams?.length || (constraint.yearStart != null && constraint.yearEnd != null));
+      const needsStintCheck =
+        !onlyEligible && Boolean(constraint) && (constraint.teams?.length || (constraint.yearStart != null && constraint.yearEnd != null));
+      const needsStintCountCheck =
+        !onlyEligible && Boolean(constraint) && (constraint.minTeamStints != null || constraint.maxTeamStints != null);
 
       // If we don't need any detail-based checks, we're done.
-      if (!needsRetiredCheck && !needsStintCheck) {
+      if (!needsRetiredCheck && !needsStintCheck && !needsStintCountCheck) {
         setSelectedEligibility(true);
         return;
       }
@@ -145,15 +150,29 @@ export function PlayerPickerPanel({
       if (cached) {
         setSelectedRetired(cached.retirement_year != null);
         if (!onlyEligible) {
-          const teamIds = new Set((constraint.teams ?? []).map((t) => t.team.id));
-          const ok = (cached.team_stints ?? []).some(
-            (s) =>
-              (teamIds.size === 0 || teamIds.has(s.team_id)) &&
-              (constraint.yearStart == null ||
-                constraint.yearEnd == null ||
-                (s.start_year <= constraint.yearEnd &&
-                  (s.end_year ?? cached.retirement_year ?? 9999) >= constraint.yearStart)),
-          );
+          let ok = true;
+          if (needsStintCheck) {
+            const teamIds = new Set((constraint.teams ?? []).map((t) => t.team.id));
+            ok =
+              ok &&
+              (cached.team_stints ?? []).some(
+                (s) =>
+                  (teamIds.size === 0 || teamIds.has(s.team_id)) &&
+                  (constraint.yearStart == null ||
+                    constraint.yearEnd == null ||
+                    (s.start_year <= constraint.yearEnd &&
+                      (s.end_year ?? cached.retirement_year ?? 9999) >= constraint.yearStart)),
+              );
+          }
+          if (needsStintCountCheck) {
+            const c = cached.coalesced_team_stint_count;
+            if (typeof c !== "number") {
+              ok = false;
+            } else {
+              if (ok && constraint.minTeamStints != null) ok = c >= constraint.minTeamStints;
+              if (ok && constraint.maxTeamStints != null) ok = c <= constraint.maxTeamStints;
+            }
+          }
           setSelectedEligibility(ok);
         } else {
           setSelectedEligibility(true);
@@ -168,15 +187,29 @@ export function PlayerPickerPanel({
         if (cancelled) return;
         setSelectedRetired(detail.retirement_year != null);
         if (!onlyEligible) {
-          const teamIds = new Set((constraint.teams ?? []).map((t) => t.team.id));
-          const ok = (detail.team_stints ?? []).some(
-            (s) =>
-              (teamIds.size === 0 || teamIds.has(s.team_id)) &&
-              (constraint.yearStart == null ||
-                constraint.yearEnd == null ||
-                (s.start_year <= constraint.yearEnd &&
-                  (s.end_year ?? detail.retirement_year ?? 9999) >= constraint.yearStart)),
-          );
+          let ok = true;
+          if (needsStintCheck) {
+            const teamIds = new Set((constraint.teams ?? []).map((t) => t.team.id));
+            ok =
+              ok &&
+              (detail.team_stints ?? []).some(
+                (s) =>
+                  (teamIds.size === 0 || teamIds.has(s.team_id)) &&
+                  (constraint.yearStart == null ||
+                    constraint.yearEnd == null ||
+                    (s.start_year <= constraint.yearEnd &&
+                      (s.end_year ?? detail.retirement_year ?? 9999) >= constraint.yearStart)),
+              );
+          }
+          if (needsStintCountCheck) {
+            const c = detail.coalesced_team_stint_count;
+            if (typeof c !== "number") {
+              ok = false;
+            } else {
+              if (ok && constraint.minTeamStints != null) ok = c >= constraint.minTeamStints;
+              if (ok && constraint.maxTeamStints != null) ok = c <= constraint.maxTeamStints;
+            }
+          }
           setSelectedEligibility(ok);
         } else {
           setSelectedEligibility(true);

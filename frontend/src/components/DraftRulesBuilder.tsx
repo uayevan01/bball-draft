@@ -401,6 +401,48 @@ export function DraftRulesBuilder({
           {!rules.allow_active && !rules.allow_retired ? (
             <div className="text-xs text-red-700 dark:text-red-300">Warning: with both off, no players will be eligible.</div>
           ) : null}
+
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+            <div className="grid gap-1">
+              <div className="text-xs text-zinc-600 dark:text-zinc-300">Minimum team stints</div>
+              <input
+                className="h-10 rounded-xl border border-black/10 bg-white px-3 text-sm dark:border-white/10 dark:bg-black"
+                type="number"
+                min={0}
+                max={200}
+                value={rules.min_team_stints ?? ""}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (!v.trim()) return onChange({ ...rules, min_team_stints: null });
+                  const n = Number(v);
+                  onChange({ ...rules, min_team_stints: Number.isFinite(n) ? Math.max(0, Math.floor(n)) : null });
+                }}
+                placeholder="e.g. 2"
+              />
+            </div>
+            <div className="grid gap-1">
+              <div className="text-xs text-zinc-600 dark:text-zinc-300">Maximum team stints</div>
+              <input
+                className="h-10 rounded-xl border border-black/10 bg-white px-3 text-sm dark:border-white/10 dark:bg-black"
+                type="number"
+                min={0}
+                max={200}
+                value={rules.max_team_stints ?? ""}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (!v.trim()) return onChange({ ...rules, max_team_stints: null });
+                  const n = Number(v);
+                  onChange({ ...rules, max_team_stints: Number.isFinite(n) ? Math.max(0, Math.floor(n)) : null });
+                }}
+                placeholder="e.g. 6"
+              />
+            </div>
+          </div>
+          {typeof rules.min_team_stints === "number" &&
+          typeof rules.max_team_stints === "number" &&
+          rules.min_team_stints > rules.max_team_stints ? (
+            <div className="text-xs text-red-700 dark:text-red-300">Warning: minimum team stints can’t be greater than maximum.</div>
+          ) : null}
         </div>
       </div>
 
