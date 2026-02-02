@@ -11,12 +11,10 @@ export function DraftLobbyHeader({
   onStartEdit,
   onCancelEdit,
   onSaveDraftName,
-  draftPathText,
   connectedText,
   currentTurnText,
   showInvite,
   copied,
-  draftId,
   onCopyDraftId,
   showStartDraft,
   startDraftDisabled,
@@ -93,10 +91,6 @@ export function DraftLobbyHeader({
             >
               {copied ? "Copied!" : "Copy draft ID"}
             </button>
-            {/* <div className="hidden font-mono text-xs text-zinc-500 dark:text-zinc-400 md:block">{draftId}</div> */}
-            <Link href="/history" className="hidden text-xs text-zinc-600 hover:underline dark:text-zinc-300 md:block">
-              History
-            </Link>
           </>
         ) : null}
 

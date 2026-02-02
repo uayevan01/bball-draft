@@ -8,7 +8,7 @@ export function DraftSideColumn({
   label,
   name,
   avatarUrl,
-  isYourTurn,
+  thisPlayerTurn,
   rerollsDisplay,
   picks,
   renderPick,
@@ -17,7 +17,7 @@ export function DraftSideColumn({
   label: "Host" | "Guest";
   name: string;
   avatarUrl: string | null;
-  isYourTurn: boolean;
+  thisPlayerTurn: boolean;
   rerollsDisplay?: { remaining: number; max: number } | null;
   picks: DraftPickWs[];
   renderPick: (p: DraftPickWs, slotNumber: number) => React.ReactNode;
@@ -38,8 +38,8 @@ export function DraftSideColumn({
           <div className="min-w-0">
             <div className="flex min-w-0 items-center gap-2">
               <span className="truncate text-sm font-semibold">{name}</span>
-              {isYourTurn ? (
-                <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-[11px] font-semibold text-white">YOUR TURN</span>
+              {thisPlayerTurn ? (
+                <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-[11px] font-semibold text-white">CHOOSING</span>
               ) : null}
             </div>
             <div className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{label}</div>

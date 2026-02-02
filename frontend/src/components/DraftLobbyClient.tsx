@@ -537,7 +537,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
   function isYourTurnForSide(side: "host" | "guest"): boolean {
     if (!currentTurn) return false;
     if (currentTurn !== side) return false;
-    return isLocal || effectiveRole === side;
+    return true;
   }
 
   const showHostSettings = Boolean((isLocal || effectiveRole === "host") && started);
@@ -685,7 +685,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
           label="Host"
           name={displayName("host")}
           avatarUrl={avatarUrl("host")}
-          isYourTurn={!draftComplete && isYourTurnForSide("host")}
+          thisPlayerTurn={!draftComplete && isYourTurnForSide("host")}
           rerollsDisplay={maxRerolls > 0 ? { remaining: rerollsRemaining.host ?? 0, max: maxRerolls } : null}
           picks={hostPicks as DraftPickWs[]}
           totalSlots={picksPerPlayer}
@@ -742,7 +742,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
           label="Guest"
           name={displayName("guest")}
           avatarUrl={avatarUrl("guest")}
-          isYourTurn={!draftComplete && isYourTurnForSide("guest")}
+          thisPlayerTurn={!draftComplete && isYourTurnForSide("guest")}
           rerollsDisplay={maxRerolls > 0 ? { remaining: rerollsRemaining.guest ?? 0, max: maxRerolls } : null}
           picks={guestPicks as DraftPickWs[]}
           totalSlots={picksPerPlayer}
