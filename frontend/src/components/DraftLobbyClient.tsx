@@ -594,18 +594,10 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
         onOnlyEligibleChange={(v) => host.setOnlyEligiblePlayers(v)}
         canForceReroll={canForceReroll}
         onForceReroll={() => {
-          const ok = window.confirm(
-            "Force reroll the current constraint? This does NOT consume reroll tokens and will affect both players.",
-          );
-          if (!ok) return;
           host.forceReroll();
         }}
         canUndoPick={canUndoPick}
         onUndoPick={() => {
-          const ok = window.confirm(
-            "Undo the most recent pick? This will delete the last pick and set it back to that player's turn.",
-          );
-          if (!ok) return;
           host.undoPick();
         }}
       />
