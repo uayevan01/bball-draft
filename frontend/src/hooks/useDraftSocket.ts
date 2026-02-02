@@ -403,6 +403,24 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
     ws.send(JSON.stringify({ type: "roll" }));
   }
 
+  function forceReroll() {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      setLastError("WebSocket closed");
+      return;
+    }
+    ws.send(JSON.stringify({ type: "force_reroll" }));
+  }
+
+  function undoPick() {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      setLastError("WebSocket closed");
+      return;
+    }
+    ws.send(JSON.stringify({ type: "undo_pick" }));
+  }
+
   function setOnlyEligiblePlayers(value: boolean) {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -440,6 +458,8 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
     startDraft,
     makePick,
     roll,
+    forceReroll,
+    undoPick,
     rollStage,
     rollText,
     rollStageDecadeLabel,
