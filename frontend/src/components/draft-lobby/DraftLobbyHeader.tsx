@@ -1,7 +1,5 @@
 "use client";
 
-import Link from "next/link";
-
 export function DraftLobbyHeader({
   draftName,
   canRename,
@@ -11,7 +9,6 @@ export function DraftLobbyHeader({
   onStartEdit,
   onCancelEdit,
   onSaveDraftName,
-  connectedText,
   currentTurnText,
   showInvite,
   copied,
@@ -29,7 +26,6 @@ export function DraftLobbyHeader({
   onCancelEdit: () => void;
   onSaveDraftName: () => void;
   draftPathText: string;
-  connectedText: string;
   currentTurnText: string;
   showInvite: boolean;
   copied: boolean;
@@ -77,7 +73,6 @@ export function DraftLobbyHeader({
             </>
           )}
         </div>
-        <div className="text-zinc-600 dark:text-zinc-300">{connectedText}</div>
         <div className="text-zinc-600 dark:text-zinc-300">{currentTurnText}</div>
       </div>
 

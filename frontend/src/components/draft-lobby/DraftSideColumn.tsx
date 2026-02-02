@@ -9,6 +9,7 @@ export function DraftSideColumn({
   name,
   avatarUrl,
   thisPlayerTurn,
+  connectionState,
   rerollsDisplay,
   picks,
   renderPick,
@@ -18,12 +19,21 @@ export function DraftSideColumn({
   name: string;
   avatarUrl: string | null;
   thisPlayerTurn: boolean;
+  connectionState?: "connected" | "disconnected" | "empty";
   rerollsDisplay?: { remaining: number; max: number } | null;
   picks: DraftPickWs[];
   renderPick: (p: DraftPickWs, slotNumber: number) => React.ReactNode;
   totalSlots: number;
 }) {
   const sorted = [...picks].sort((a, b) => a.pick_number - b.pick_number);
+  const ringClass =
+    connectionState === "connected"
+      ? "ring-3 ring-emerald-500"
+      : connectionState === "empty"
+        ? "ring-3 ring-zinc-500/40"
+        : "ring-3 ring-red-500";
+  const ringTitle =
+    connectionState === "connected" ? "Connected" : connectionState === "empty" ? "Slot empty" : "Disconnected";
   return (
     <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-900/50">
       <div className="flex items-start justify-between gap-3">
@@ -33,7 +43,8 @@ export function DraftSideColumn({
             alt={name}
             width={28}
             height={28}
-            className="h-7 w-7 flex-none rounded-full object-cover"
+            title={ringTitle}
+            className={`h-7 w-7 flex-none rounded-full object-cover ${ringClass}`}
           />
           <div className="min-w-0">
             <div className="flex min-w-0 items-center gap-2">

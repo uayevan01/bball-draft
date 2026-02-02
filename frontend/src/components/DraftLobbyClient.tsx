@@ -565,7 +565,6 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
           setDraftNameEditing(false);
         }}
         draftPathText={`/draft/${draft?.public_id ?? draftRef}`}
-        connectedText={`Connected: ${connectedRoles.length ? connectedRoles.join(", ") : "(none)"}`}
         currentTurnText={draftComplete ? "Draft complete" : `Turn: ${currentTurn ?? "—"}`}
         showInvite={!isLocal}
         copied={copied}
@@ -686,6 +685,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
           name={displayName("host")}
           avatarUrl={avatarUrl("host")}
           thisPlayerTurn={!draftComplete && isYourTurnForSide("host")}
+          connectionState={connectedRoles.includes("host") ? "connected" : "disconnected"}
           rerollsDisplay={maxRerolls > 0 ? { remaining: rerollsRemaining.host ?? 0, max: maxRerolls } : null}
           picks={hostPicks as DraftPickWs[]}
           totalSlots={picksPerPlayer}
@@ -743,6 +743,13 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
           name={displayName("guest")}
           avatarUrl={avatarUrl("guest")}
           thisPlayerTurn={!draftComplete && isYourTurnForSide("guest")}
+          connectionState={
+            draft?.guest_id
+              ? connectedRoles.includes("guest")
+                ? "connected"
+                : "disconnected"
+              : "empty"
+          }
           rerollsDisplay={maxRerolls > 0 ? { remaining: rerollsRemaining.guest ?? 0, max: maxRerolls } : null}
           picks={guestPicks as DraftPickWs[]}
           totalSlots={picksPerPlayer}
