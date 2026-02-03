@@ -7,6 +7,7 @@ import { AppShell } from "@/components/AppShell";
 import { DraftCreateForm } from "@/components/DraftCreateForm";
 import { backendGet } from "@/lib/backendClient";
 import type { DraftType } from "@/lib/types";
+import { JoinDraftById } from "@/components/JoinDraftById";
 
 export default function NewDraftPage() {
   const { getToken } = useAuth();
@@ -43,6 +44,9 @@ export default function NewDraftPage() {
       ) : null}
 
       <DraftCreateForm draftTypes={draftTypes} />
+      <h2 className="mt-6 text-2xl font-semibold tracking-tight">Join by draft ID</h2>
+      <JoinDraftById />
+
     </AppShell>
   );
 }
