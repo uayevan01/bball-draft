@@ -108,13 +108,40 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
       : guest
     : multiplayerSocket;
 
-  const connectedRoles = isLocal
-    ? Array.from(new Set([...(host.connectedRoles ?? []), ...(guest.connectedRoles ?? [])]))
-    : stateSocket.connectedRoles ?? [];
+  const connectedRoles = useMemo(() => {
+    return isLocal
+      ? Array.from(new Set([...(host.connectedRoles ?? []), ...(guest.connectedRoles ?? [])]))
+      : stateSocket.connectedRoles ?? [];
+  }, [guest.connectedRoles, host.connectedRoles, isLocal, stateSocket.connectedRoles]);
+
+  const guestConnected = useMemo(() => connectedRoles.includes("guest"), [connectedRoles]);
   const firstTurn = stateSocket.firstTurn;
   const currentTurn = stateSocket.currentTurn;
   const picks = stateSocket.picks;
   const lastError = stateSocket.lastError;
+
+  // When a guest joins, the host's initial REST-loaded `draft` object may still have guest=null.
+  // The WS connection state updates immediately, so use that as a signal to refresh draft participants.
+  useEffect(() => {
+    let cancelled = false;
+    async function run() {
+      if (isLocal) return;
+      if (!draft) return;
+      if (!guestConnected) return;
+      if (draft.guest) return;
+      try {
+        const token = await getToken().catch(() => null);
+        const fresh = await backendGet<Draft>(`/drafts/${encodeURIComponent(draftRef)}`, token);
+        if (!cancelled) setDraft(fresh);
+      } catch {
+        // ignore; UI will still work and can update on refresh
+      }
+    }
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [draft, draftRef, getToken, guestConnected, isLocal]);
 
   const started = Boolean(firstTurn);
 
