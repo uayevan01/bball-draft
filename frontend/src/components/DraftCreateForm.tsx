@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useAuth } from "@clerk/nextjs";
 
 import { backendPost } from "@/lib/backendClient";
 import type { Draft, DraftType } from "@/lib/types";
+import { SearchableSelect } from "@/components/SearchableSelect";
 
 export function DraftCreateForm({ draftTypes }: { draftTypes: DraftType[] }) {
   const router = useRouter();
@@ -14,18 +15,11 @@ export function DraftCreateForm({ draftTypes }: { draftTypes: DraftType[] }) {
 
   // No default selection: force the user to explicitly choose a draft type.
   const [draftTypeId, setDraftTypeId] = useState<number | null>(null);
-  const [draftTypeQuery, setDraftTypeQuery] = useState<string>("");
   const [picksPerPlayer, setPicksPerPlayer] = useState<number>(10);
   const [showSuggestions, setShowSuggestions] = useState<boolean>(true);
   const [localMode, setLocalMode] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const filteredDraftTypes = useMemo(() => {
-    const q = draftTypeQuery.trim().toLowerCase();
-    if (!q) return draftTypes;
-    return draftTypes.filter((dt) => dt.name.toLowerCase().includes(q));
-  }, [draftTypes, draftTypeQuery]);
 
   async function onCreate() {
     setError(null);
@@ -62,38 +56,17 @@ export function DraftCreateForm({ draftTypes }: { draftTypes: DraftType[] }) {
             Manage draft types
           </Link>
         </div>
-        <input
-          className="h-11 rounded-xl border border-black/10 bg-white px-3 text-sm dark:border-white/10 dark:bg-black"
-          value={draftTypeQuery}
-          onChange={(e) => setDraftTypeQuery(e.target.value)}
-          placeholder="Search draft types…"
+        <SearchableSelect<DraftType>
+          items={draftTypes}
+          value={draftTypeId}
+          onChange={(dt) => setDraftTypeId(dt ? dt.id : null)}
+          getKey={(dt) => dt.id}
+          getLabel={(dt) => dt.name}
+          placeholder="Select a draft type"
+          searchPlaceholder="Search draft types…"
+          emptyText="No matches"
+          disabled={draftTypes.length === 0}
         />
-        <select
-          className="h-11 rounded-xl border border-black/10 bg-white px-3 text-sm dark:border-white/10 dark:bg-black"
-          value={draftTypeId ?? ""}
-          onChange={(e) => {
-            const v = e.target.value;
-            setDraftTypeId(v ? Number(v) : null);
-          }}
-        >
-          {draftTypes.length === 0 ? (
-            <option value="">No draft types available</option>
-          ) : (
-            <>
-              <option value="">Select a draft type</option>
-              {filteredDraftTypes.length === 0 ? (
-                <option value="" disabled>
-                  No matches
-                </option>
-              ) : null}
-              {filteredDraftTypes.map((dt) => (
-                <option key={dt.id} value={dt.id}>
-                  {dt.name}
-                </option>
-              ))}
-            </>
-          )}
-        </select>
       </div>
 
       <div className="grid gap-2 sm:grid-cols-3">
