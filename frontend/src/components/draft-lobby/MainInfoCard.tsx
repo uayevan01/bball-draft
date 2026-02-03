@@ -85,7 +85,7 @@ export function MainInfoCard({
   })();
 
   return (
-    <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-900/50">
+    <div className="relative rounded-xl border border-black/10 bg-white p-4 pb-4 dark:border-white/10 dark:bg-zinc-900/50">
       {/* NOTE: Intentionally hiding "Current turn" + whose turn it is for now (redundant with other UI). */}
       {draftComplete ? (
         <div className="grid gap-3">
@@ -106,7 +106,7 @@ export function MainInfoCard({
             const showRerollOverlay = !isSpinning && Boolean(constraint) && showRollButton && canRoll;
 
             return (
-              <div className="relative w-full min-h-[120px] rounded-2xl px-5 py-4 text-center">
+              <div className="relative w-full h-[240px] overflow-y-auto overscroll-contain rounded-2xl px-5 pt-10 pb-4 text-center">
                 {/* Reroll lives as an overlay when a constraint exists */}
                 {showRerollOverlay ? (
                   <div className="absolute right-4 top-4">
@@ -125,7 +125,7 @@ export function MainInfoCard({
 
                 {/* Main content */}
                 {isSpinning ? (
-                  <div className="grid justify-items-center gap-2">
+                  <div className="min-h-full grid content-center justify-items-center gap-2">
                     {rollStage === "spinning_team" && spinPreviewTeam?.logo_url ? (
                       <Image
                         src={spinPreviewTeam.logo_url}
@@ -178,7 +178,7 @@ export function MainInfoCard({
                     </div>
                   </div>
                 ) : constraint ? (
-                  <div className="grid justify-items-center gap-2">
+                  <div className="min-h-full grid content-center justify-items-center gap-2">
                     <div className="flex flex-wrap items-center justify-center gap-3">
                       {groupedSegments.map((segs, i) => (
                         <div key={i} className="flex items-center gap-2">
@@ -231,7 +231,7 @@ export function MainInfoCard({
                     ) : null}
                   </div>
                 ) : showBigRoll ? (
-                  <div className="flex min-h-[120px] items-center justify-center">
+                  <div className="flex min-h-full items-center justify-center">
                     <button
                       type="button"
                       onClick={onRoll}
@@ -244,11 +244,11 @@ export function MainInfoCard({
                     </button>
                   </div>
                 ) : showWaiting ? (
-                  <div className="flex min-h-[120px] items-center justify-center text-sm text-zinc-600 dark:text-zinc-300">
+                  <div className="flex min-h-full items-center justify-center text-sm text-zinc-600 dark:text-zinc-300">
                     Waiting for other player to spin
                   </div>
                 ) : (
-                  <div className="flex min-h-[120px] items-center justify-center text-sm text-zinc-600 dark:text-zinc-300">
+                  <div className="flex min-h-full items-center justify-center text-sm text-zinc-600 dark:text-zinc-300">
                     Constraint loading…
                   </div>
                 )}
@@ -260,7 +260,7 @@ export function MainInfoCard({
 
       {/* Ephemeral info message (moved to bottom, under constraints) */}
       {!draftComplete && infoMessage ? (
-        <div className="mt-3 text-center text-xs font-medium text-zinc-600 dark:text-zinc-300">
+        <div className="absolute bottom-3 left-4 right-4 text-center text-xs font-medium text-zinc-600 dark:text-zinc-300">
           {infoMessage}
         </div>
       ) : null}

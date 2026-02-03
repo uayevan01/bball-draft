@@ -51,6 +51,9 @@ TEAM_METADATA: dict[str, dict[str, str]] = {
     "HOU": {"conference": "West", "division": "Southwest"},
     "MEM": {"conference": "West", "division": "Southwest"},
     "NOP": {"conference": "West", "division": "Southwest"},
+    # Historical / temporary abbreviations (used by BRef player season tables)
+    "WSB": {"conference": "East", "division": "Southeast"},  # Washington Bullets
+    "NOK": {"conference": "West", "division": "Southwest"},  # New Orleans/Oklahoma City Hornets
     "SAS": {"conference": "West", "division": "Southwest"},
 }
 
@@ -65,6 +68,29 @@ ABBR_ALIASES: dict[str, str] = {
 # Minimal historical team identity list (separate rows) + lineage via previous_team_id.
 # Note: conference/division is often time-varying historically; we store a best-effort snapshot.
 TEAM_HISTORY: list[dict] = [
+    # Wizards historical identity (BRef uses WSB for many seasons in the 70s–90s)
+    {
+        "abbreviation": "WSB",
+        "name": "Washington Bullets",
+        "city": "Washington",
+        # Best-effort range: Bullets name used for decades; exact start varies with earlier Baltimore/Capital eras.
+        "founded_year": 1973,
+        "dissolved_year": 1997,
+        "conference": "East",
+        "division": "Southeast",
+        "previous_abbreviation": None,
+    },
+    {
+        "abbreviation": "WAS",
+        "name": "Washington Wizards",
+        "city": "Washington",
+        "founded_year": 1997,
+        "dissolved_year": None,
+        "conference": "East",
+        "division": "Southeast",
+        "previous_abbreviation": "WSB",
+    },
+
     # Relocations / renames (common modern ones)
     {
         "abbreviation": "SEA",
@@ -115,6 +141,17 @@ TEAM_HISTORY: list[dict] = [
         "conference": "West",
         "division": "Southwest",
         "previous_abbreviation": None,
+    },
+    # Temporary relocation (Hurricane Katrina): BRef uses NOK for those seasons, so we need a separate identity row.
+    {
+        "abbreviation": "NOK",
+        "name": "New Orleans/Oklahoma City Hornets",
+        "city": "New Orleans / Oklahoma City",
+        "founded_year": 2005,
+        "dissolved_year": 2007,
+        "conference": "West",
+        "division": "Southwest",
+        "previous_abbreviation": "NOH",
     },
     {
         "abbreviation": "NOP",
