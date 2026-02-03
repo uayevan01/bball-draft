@@ -20,7 +20,7 @@ export default function NewDraftPage() {
       setError(null);
       try {
         const token = await getToken().catch(() => null);
-        const items = await backendGet<DraftType[]>("/draft-types", token);
+        const items = await backendGet<DraftType[]>("/draft-types?sort=usage", token);
         if (!cancelled) setDraftTypes(items);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load draft types.");

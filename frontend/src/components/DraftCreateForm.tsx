@@ -14,11 +14,18 @@ export function DraftCreateForm({ draftTypes }: { draftTypes: DraftType[] }) {
 
   // No default selection: force the user to explicitly choose a draft type.
   const [draftTypeId, setDraftTypeId] = useState<number | null>(null);
+  const [draftTypeQuery, setDraftTypeQuery] = useState<string>("");
   const [picksPerPlayer, setPicksPerPlayer] = useState<number>(10);
   const [showSuggestions, setShowSuggestions] = useState<boolean>(true);
   const [localMode, setLocalMode] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const filteredDraftTypes = useMemo(() => {
+    const q = draftTypeQuery.trim().toLowerCase();
+    if (!q) return draftTypes;
+    return draftTypes.filter((dt) => dt.name.toLowerCase().includes(q));
+  }, [draftTypes, draftTypeQuery]);
 
   async function onCreate() {
     setError(null);
@@ -55,6 +62,12 @@ export function DraftCreateForm({ draftTypes }: { draftTypes: DraftType[] }) {
             Manage draft types
           </Link>
         </div>
+        <input
+          className="h-11 rounded-xl border border-black/10 bg-white px-3 text-sm dark:border-white/10 dark:bg-black"
+          value={draftTypeQuery}
+          onChange={(e) => setDraftTypeQuery(e.target.value)}
+          placeholder="Search draft types…"
+        />
         <select
           className="h-11 rounded-xl border border-black/10 bg-white px-3 text-sm dark:border-white/10 dark:bg-black"
           value={draftTypeId ?? ""}
@@ -68,7 +81,12 @@ export function DraftCreateForm({ draftTypes }: { draftTypes: DraftType[] }) {
           ) : (
             <>
               <option value="">Select a draft type</option>
-              {draftTypes.map((dt) => (
+              {filteredDraftTypes.length === 0 ? (
+                <option value="" disabled>
+                  No matches
+                </option>
+              ) : null}
+              {filteredDraftTypes.map((dt) => (
                 <option key={dt.id} value={dt.id}>
                   {dt.name}
                 </option>

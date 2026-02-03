@@ -4,8 +4,10 @@ export type DraftType = {
   description?: string | null;
   rules: Record<string, unknown>;
   created_by_id?: string | null;
+  created_by_username?: string | null;
   is_public: boolean;
   created_at: string;
+  usage_count?: number;
 };
 
 export type Draft = {

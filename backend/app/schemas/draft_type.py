@@ -28,7 +28,9 @@ class DraftTypeOut(ORMBaseModel):
     description: str | None = None
     rules: dict
     created_by_id: uuid.UUID | None = None
+    created_by_username: str | None = None
     is_public: bool
     created_at: datetime
+    usage_count: int = 0
 
 

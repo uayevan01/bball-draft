@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import DraftType, User
+from app.models import Draft, DraftType, User
 from app.schemas.draft_type import DraftTypeCreate, DraftTypeOut, DraftTypeUpdate
 from app.services.auth import get_current_user
 
@@ -16,12 +16,36 @@ router = APIRouter(prefix="/draft-types", tags=["draft-types"])
 async def list_draft_types(
     mine: bool = Query(default=False, description="If true, include only draft types created by me"),
     include_public: bool = Query(default=True, description="Include public draft types"),
+    public_only: bool = Query(default=False, description="If true, include only public draft types (from all users)"),
+    q: str | None = Query(default=None, description="Search draft types by name"),
+    sort: str = Query(default="usage", description="Sort by: usage | created_at"),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[DraftType]:
-    stmt = select(DraftType)
+    usage_subq = (
+        select(
+            Draft.draft_type_id.label("draft_type_id"),
+            func.count(Draft.id).label("usage_count"),
+        )
+        .group_by(Draft.draft_type_id)
+        .subquery()
+    )
 
-    if mine:
+    usage_count = func.coalesce(usage_subq.c.usage_count, 0)
+
+    stmt = (
+        select(
+            DraftType,
+            usage_count.label("usage_count"),
+            User.username.label("created_by_username"),
+        )
+        .outerjoin(usage_subq, usage_subq.c.draft_type_id == DraftType.id)
+        .outerjoin(User, User.id == DraftType.created_by_id)
+    )
+
+    if public_only:
+        stmt = stmt.where(DraftType.is_public.is_(True))
+    elif mine:
         # Only my draft types (public or private).
         stmt = stmt.where(DraftType.created_by_id == user.id)
     else:
@@ -31,8 +55,25 @@ async def list_draft_types(
         else:
             stmt = stmt.where(DraftType.created_by_id == user.id)
 
-    stmt = stmt.order_by(DraftType.created_at.desc())
-    return (await db.execute(stmt)).scalars().all()
+    if q:
+        q_norm = q.strip()
+        if q_norm:
+            stmt = stmt.where(DraftType.name.ilike(f"%{q_norm}%"))
+
+    if sort == "created_at":
+        stmt = stmt.order_by(DraftType.created_at.desc())
+    else:
+        # Default: most-used first (for easier selection when there are many).
+        stmt = stmt.order_by(usage_count.desc(), DraftType.created_at.desc())
+
+    rows = (await db.execute(stmt)).all()
+    out: list[DraftType] = []
+    for dt, usage, created_by_username in rows:
+        # Attach computed fields for Pydantic serialization (from_attributes=True).
+        setattr(dt, "usage_count", int(usage or 0))
+        setattr(dt, "created_by_username", created_by_username)
+        out.append(dt)
+    return out
 
 
 @router.post("", response_model=DraftTypeOut)
