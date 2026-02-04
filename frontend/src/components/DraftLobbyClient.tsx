@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
 
@@ -43,7 +43,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
   const [spinPreviewTeam, setSpinPreviewTeam] = useState<SpinPreviewTeam | null>(null);
   const [spinPreviewLetter, setSpinPreviewLetter] = useState<string | null>(null);
   const [spinPreviewPlayer, setSpinPreviewPlayer] = useState<PlayerSearchResult | null>(null);
-  const [warmPlayerPool, setWarmPlayerPool] = useState<PlayerSearchResult[]>([]);
+  const warmPlayerPoolRef = useRef<PlayerSearchResult[]>([]);
 
   // Load backend user + draft so we can auto-assign roles for non-local lobbies.
   useEffect(() => {
@@ -182,6 +182,10 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
   const spinsNameLetter = Boolean(rules?.spin_fields?.includes("name_letter"));
   const spinsPlayer = Boolean(rules?.spin_fields?.includes("player"));
   const usesRoll = spinsYear || spinsTeam || spinsNameLetter || spinsPlayer;
+
+  const myRerollsRemaining = effectiveRole === "guest" ? (rerollsRemaining.guest ?? 0) : (rerollsRemaining.host ?? 0);
+  const isRerollAttempt = Boolean(rollConstraint);
+  const rollDisabled = Boolean(isSpinning || (isRerollAttempt && myRerollsRemaining <= 0));
 
   const staticTeamConstraint = useMemo(() => {
     if (usesRoll) return null;
@@ -351,10 +355,16 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
     let cancelled = false;
     async function run() {
       try {
-        const token = await getToken().catch(() => null);
-        const data = await backendGet<PlayerSearchResult[]>(`/players?limit=200`, token);
+        // Try without token first (faster in some environments); fall back to auth token if needed.
+        let data: PlayerSearchResult[] | null = null;
+        try {
+          data = await backendGet<PlayerSearchResult[]>(`/players?limit=200`, null);
+        } catch {
+          const token = await getToken().catch(() => null);
+          data = await backendGet<PlayerSearchResult[]>(`/players?limit=200`, token);
+        }
         if (cancelled) return;
-        setWarmPlayerPool((data ?? []).filter((p) => !draftedIds.has(p.id)));
+        warmPlayerPoolRef.current = (data ?? []).filter((p) => !draftedIds.has(p.id));
       } catch {
         // ignore; spinner will still work, just without warm animation pool
       }
@@ -409,7 +419,8 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
 
       // Start animating immediately from the warm pool (or last fetched pool) so the user
       // sees motion right away on the first roll.
-      const immediatePool = (warmPlayerPool ?? []).filter((p) => !draftedIds.has(p.id));
+      const immediatePool = (warmPlayerPoolRef.current ?? []).filter((p) => !draftedIds.has(p.id));
+      const startedImmediately = immediatePool.length > 0;
       if (immediatePool.length) {
         scheduleSpin<PlayerSearchResult>(immediatePool, (v) => setSpinPreviewPlayer(v), 1100, 90, cancelledRef);
       }
@@ -447,7 +458,11 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
           if (!pool.length) return;
 
           // Cache the constraint-specific pool for future rerolls (and to keep the warm pool "fresh").
-          setWarmPlayerPool(pool);
+          warmPlayerPoolRef.current = pool;
+          // If we had no warm pool ready, start animating as soon as the eligible pool arrives.
+          if (!startedImmediately) {
+            scheduleSpin<PlayerSearchResult>(pool, (v) => setSpinPreviewPlayer(v), 1100, 90, cancelledRef);
+          }
         } catch {
           // ignore animation fetch errors; final result still comes from server
         }
@@ -576,7 +591,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
     };
     // We intentionally depend on rollStage + isSpinning; preview updates are internal.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [usesRoll, isSpinning, rollStage, eligibilityConstraint, draftedIds, getToken, warmPlayerPool]);
+  }, [usesRoll, isSpinning, rollStage, eligibilityConstraint, draftedIds, getToken]);
 
   // Show a short-lived "X has selected Y" message when a new pick is made.
   useEffect(() => {
@@ -743,7 +758,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
           showRollButton={usesRoll && !draftComplete}
           canRoll={canPick}
           rollButtonLabel={rollConstraint ? "Reroll" : "Roll"}
-          rollDisabled={isSpinning}
+          rollDisabled={rollDisabled}
           onRoll={() => pickSocket.roll()}
           showConstraint={hasAnyConstraintRule && !draftComplete}
           isSpinning={isSpinning}
@@ -754,6 +769,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
           spinPreviewPlayer={spinPreviewPlayer}
           rollStageDecadeLabel={rollStageDecadeLabel}
           constraint={eligibilityConstraint}
+          hideRerollOverlay={spinsPlayer}
         />
       ) : null}
 
@@ -829,6 +845,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
             }}
             playerSpinEnabled={spinsPlayer}
             onReroll={() => pickSocket.roll()}
+            rerollsRemaining={myRerollsRemaining}
           />
         ) : null}
 

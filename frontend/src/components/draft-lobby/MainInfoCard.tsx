@@ -22,6 +22,7 @@ export function MainInfoCard({
   spinPreviewPlayer,
   rollStageDecadeLabel,
   constraint,
+  hideRerollOverlay,
 }: {
   currentTurnName: string;
   isLocal: boolean;
@@ -41,6 +42,7 @@ export function MainInfoCard({
   spinPreviewPlayer: PlayerSearchResult | null;
   rollStageDecadeLabel: string | null;
   constraint: EligibilityConstraint | null;
+  hideRerollOverlay?: boolean;
 }) {
   const segments = constraint?.teams ?? [];
   const segmentCount = segments.length;
@@ -105,7 +107,7 @@ export function MainInfoCard({
           {(() => {
             const showBigRoll = !isSpinning && !constraint && showRollButton && canRoll;
             const showWaiting = !isSpinning && !constraint && showRollButton && !canRoll;
-            const showRerollOverlay = !isSpinning && Boolean(constraint) && showRollButton && canRoll;
+            const showRerollOverlay = !hideRerollOverlay && !isSpinning && Boolean(constraint) && showRollButton && canRoll;
 
             return (
               <div className="relative w-full h-[240px] overflow-y-auto overscroll-contain rounded-2xl px-5 pt-10 pb-4 text-center">
@@ -148,13 +150,29 @@ export function MainInfoCard({
                         );
                       })()
                     ) : rollStage === "spinning_player" ? (
-                      <Image
-                        src={spinPreviewPlayer?.image_url ?? "/avatar-placeholder.svg"}
-                        alt={spinPreviewPlayer?.name ?? "Player"}
-                        width={96}
-                        height={96}
-                        className="h-24 w-24 rounded-2xl object-contain"
-                      />
+                      <div className="flex items-center justify-center gap-3">
+                        {constraint?.teams?.length ? (
+                          (() => {
+                            const seg = constraint.teams[constraint.teams.length - 1];
+                            const logo = seg?.team?.logo_url ?? null;
+                            const name = seg?.team?.name ?? "Team";
+                            return logo ? (
+                              <Image src={logo} alt={name} width={96} height={96} className="h-24 w-24 object-contain" />
+                            ) : (
+                              <div className="h-24 w-24" />
+                            );
+                          })()
+                        ) : (
+                          <div className="h-24 w-24" />
+                        )}
+                        <Image
+                          src={spinPreviewPlayer?.image_url ?? "/avatar-placeholder.svg"}
+                          alt={spinPreviewPlayer?.name ?? "Player"}
+                          width={96}
+                          height={96}
+                          className="h-24 w-24 rounded-2xl object-contain"
+                        />
+                      </div>
                     ) : (
                       <div className="h-24 w-24" />
                     )}
