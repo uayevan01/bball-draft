@@ -26,8 +26,6 @@ export function PlayerPickerPanel({
   searchError,
   onPickPlayer,
   playerSpinEnabled,
-  onReroll,
-  rerollsRemaining,
 }: {
   started: boolean;
   canPick: boolean;
@@ -49,8 +47,6 @@ export function PlayerPickerPanel({
   searchError: string | null;
   onPickPlayer: (playerId: number) => void;
   playerSpinEnabled: boolean;
-  onReroll: () => void;
-  rerollsRemaining: number;
 }) {
   const { getToken } = useAuth();
   const [q, setQ] = useState("");
@@ -113,7 +109,6 @@ export function PlayerPickerPanel({
   const myPending = pendingSelection?.[myRole] ?? null;
 
   const canTakeRolled = Boolean(started && canPick && !isSpinning && myPending && !drafted(myPending.id));
-  const canRerollRolled = Boolean(started && canPick && !isSpinning && rerollsRemaining > 0);
 
   function matchesNameLetter(name: string, letter: string, part: "first" | "last" | "either") {
     const L = letter.trim().toUpperCase();
@@ -276,7 +271,7 @@ export function PlayerPickerPanel({
           <div className="mt-3 grid gap-3">
             {!myPending ? (
               <div className="rounded-xl border border-black/10 bg-black/5 p-3 text-sm text-zinc-700 dark:border-white/10 dark:bg-white/10 dark:text-zinc-200">
-                Player Roll
+                Waiting for roll...
               </div>
             ) : (
               <div className="rounded-xl border border-black/10 bg-black/5 p-3 dark:border-white/10 dark:bg-white/10">
@@ -294,14 +289,6 @@ export function PlayerPickerPanel({
                     </div>
                   </div>
                   <div className="flex flex-wrap justify-end gap-2">
-                    <button
-                      type="button"
-                      onClick={() => onReroll()}
-                      disabled={!canRerollRolled}
-                      className="h-10 whitespace-nowrap rounded-full border border-black/10 bg-white px-3 text-sm font-semibold text-zinc-950 hover:bg-black/5 disabled:opacity-60 dark:border-white/10 dark:bg-zinc-900 dark:text-white dark:hover:bg-zinc-800"
-                    >
-                      Reroll
-                    </button>
                     <button
                       type="button"
                       disabled={!canTakeRolled}
@@ -324,10 +311,6 @@ export function PlayerPickerPanel({
 
                 {myPending && drafted(myPending.id) ? (
                   <div className="mt-2 text-xs text-red-700 dark:text-red-300">This player was already drafted. Please reroll.</div>
-                ) : null}
-
-                {rerollsRemaining <= 0 ? (
-                  <div className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">No rerolls remaining.</div>
                 ) : null}
               </div>
             )}

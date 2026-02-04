@@ -55,6 +55,19 @@ async def _load_rules_for_draft(draft_id: int) -> dict:
         return dt.rules if dt and isinstance(dt.rules, dict) else {}
 
 
+async def _persist_current_constraint(*, draft_id: int, by_role: Role, constraint: dict | None) -> None:
+    """
+    Persist the current roll constraint so refresh/reconnect doesn't lose it.
+    """
+    async with SessionLocal() as db:
+        draft = await db.get(Draft, draft_id, with_for_update=True)
+        if not draft:
+            return
+        draft.current_constraint = constraint
+        draft.current_constraint_role = by_role if constraint is not None else None
+        await db.commit()
+
+
 def _max_rerolls_from_rules(rules: dict) -> int:
     allow_reroll = bool(rules.get("allow_reroll", True))
     try:
@@ -744,6 +757,19 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
                 session.only_eligible = bool(True if suggest is None else suggest)
             if session.draft_name is None:
                 session.draft_name = draft.name
+            # Restore persisted roll constraint (if any) so refresh doesn't lose the roll.
+            persisted = getattr(draft, "current_constraint", None)
+            persisted_role = getattr(draft, "current_constraint_role", None)
+            if isinstance(persisted, dict):
+                session.current_constraint = persisted
+                # If this was a player-roll constraint, also restore pending selection for the owning role.
+                player_payload = persisted.get("player")
+                if (
+                    isinstance(player_payload, dict)
+                    and isinstance(player_payload.get("id"), int)
+                    and persisted_role in ("host", "guest")
+                ):
+                    session.pending_selection[persisted_role] = player_payload
 
     await draft_manager.broadcast(
         session,
@@ -1008,6 +1034,8 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
         async with session.lock:
             final_constraint = session.current_constraint
         if final_constraint:
+            # Persist the final constraint so refresh/reconnect doesn't lose it.
+            await _persist_current_constraint(draft_id=draft_id, by_role=by_role, constraint=final_constraint)
             await draft_manager.broadcast(session, {"type": "roll_result", "draft_id": draft_id, "by_role": by_role, "constraint": final_constraint})
             # If we rolled a player, treat it as the active "pending selection" for that role.
             player_payload = final_constraint.get("player") if isinstance(final_constraint, dict) else None
@@ -1239,6 +1267,8 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
                     )
                     session.current_constraint = None
                     session.pending_selection[role] = None
+                # Clear persisted constraint once a pick is made (new turn starts clean).
+                await _persist_current_constraint(draft_id=draft_id, by_role=role, constraint=None)
                 await draft_manager.broadcast(
                     session,
                     {

@@ -769,7 +769,6 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
           spinPreviewPlayer={spinPreviewPlayer}
           rollStageDecadeLabel={rollStageDecadeLabel}
           constraint={eligibilityConstraint}
-          hideRerollOverlay={spinsPlayer}
         />
       ) : null}
 
@@ -844,8 +843,6 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
               });
             }}
             playerSpinEnabled={spinsPlayer}
-            onReroll={() => pickSocket.roll()}
-            rerollsRemaining={myRerollsRemaining}
           />
         ) : null}
 

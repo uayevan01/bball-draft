@@ -22,7 +22,6 @@ export function MainInfoCard({
   spinPreviewPlayer,
   rollStageDecadeLabel,
   constraint,
-  hideRerollOverlay,
 }: {
   currentTurnName: string;
   isLocal: boolean;
@@ -42,7 +41,6 @@ export function MainInfoCard({
   spinPreviewPlayer: PlayerSearchResult | null;
   rollStageDecadeLabel: string | null;
   constraint: EligibilityConstraint | null;
-  hideRerollOverlay?: boolean;
 }) {
   const segments = constraint?.teams ?? [];
   const segmentCount = segments.length;
@@ -107,7 +105,7 @@ export function MainInfoCard({
           {(() => {
             const showBigRoll = !isSpinning && !constraint && showRollButton && canRoll;
             const showWaiting = !isSpinning && !constraint && showRollButton && !canRoll;
-            const showRerollOverlay = !hideRerollOverlay && !isSpinning && Boolean(constraint) && showRollButton && canRoll;
+            const showRerollOverlay = !isSpinning && Boolean(constraint) && showRollButton && canRoll;
 
             return (
               <div className="relative w-full h-[240px] overflow-y-auto overscroll-contain rounded-2xl px-5 pt-10 pb-4 text-center">

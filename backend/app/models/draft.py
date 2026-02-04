@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 import uuid
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -34,6 +34,11 @@ class Draft(Base):
     # Remaining rerolls per player for this draft (persistent).
     host_rerolls: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     guest_rerolls: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    # Persisted "current roll" so refresh/reconnect doesn't lose the constraint.
+    # This is the constraint for the current turn player (role tracked separately).
+    current_constraint: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    current_constraint_role: Mapped[str | None] = mapped_column(String(10), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
