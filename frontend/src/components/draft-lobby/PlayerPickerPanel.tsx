@@ -238,11 +238,32 @@ export function PlayerPickerPanel({
         <>
           <div className="text-sm font-semibold">Your player</div>
           <div className="mt-3 grid gap-3">
+            {otherPending ? (
+              <div className="rounded-xl border border-black/10 bg-black/5 p-3 dark:border-white/10 dark:bg-white/10">
+                <div className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
+                  {otherRole === "host" ? "Host" : "Guest"} rolled…
+                </div>
+                <div className="mt-2 flex min-w-0 items-center gap-3">
+                  <Image
+                    src={otherPending.image_url ?? "/avatar-placeholder.svg"}
+                    alt={otherPending.name}
+                    width={40}
+                    height={40}
+                    className="h-10 w-10 flex-none rounded-lg object-contain"
+                  />
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold">{otherPending.name}</div>
+                    <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">Not confirmed yet</div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
             {!rolledPlayers.length ? (
               <div className="rounded-xl border border-black/10 bg-black/5 p-3 text-sm text-zinc-700 dark:border-white/10 dark:bg-white/10 dark:text-zinc-200">
                 Waiting for roll...
               </div>
-            ) : (
+            ) : selectedRolled ? (
               <div className="rounded-xl border border-black/10 bg-black/5 p-3 dark:border-white/10 dark:bg-white/10">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex min-w-0 items-center gap-3">
@@ -254,7 +275,7 @@ export function PlayerPickerPanel({
                       className="h-10 w-10 flex-none rounded-lg object-contain"
                     />
                     <div className="min-w-0">
-                      <div className="truncate text-sm font-semibold">{selectedRolled?.name ?? "Select a player below"}</div>
+                      <div className="truncate text-sm font-semibold">{selectedRolled?.name}</div>
                     </div>
                   </div>
                   <div className="flex flex-wrap justify-end gap-2">
@@ -282,7 +303,7 @@ export function PlayerPickerPanel({
                   <div className="mt-2 text-xs text-red-700 dark:text-red-300">This player was already drafted. Please reroll.</div>
                 ) : null}
               </div>
-            )}
+            ) : null}
 
             {rolledPlayers.length ? (
               <div className="grid gap-2">
@@ -320,27 +341,6 @@ export function PlayerPickerPanel({
                       </button>
                     );
                   })}
-                </div>
-              </div>
-            ) : null}
-
-            {otherPending ? (
-              <div className="rounded-xl border border-black/10 bg-black/5 p-3 dark:border-white/10 dark:bg-white/10">
-                <div className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
-                  {otherRole === "host" ? "Host" : "Guest"} rolled…
-                </div>
-                <div className="mt-2 flex min-w-0 items-center gap-3">
-                  <Image
-                    src={otherPending.image_url ?? "/avatar-placeholder.svg"}
-                    alt={otherPending.name}
-                    width={40}
-                    height={40}
-                    className="h-10 w-10 flex-none rounded-lg object-contain"
-                  />
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold">{otherPending.name}</div>
-                    <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">Not confirmed yet</div>
-                  </div>
                 </div>
               </div>
             ) : null}
