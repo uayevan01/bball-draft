@@ -205,6 +205,7 @@ export function MainInfoCard({
                     <div className="flex flex-wrap items-stretch justify-center gap-3">
                       {constraints.map((c, idx) => {
                         const segs = c.teams ?? [];
+                        const showTeamNameInline = segs.length < 3;
                         const byId = new Map<number, { previous_team_id?: number | null }>();
                         for (const s of segs) byId.set(s.team.id, { previous_team_id: s.team.previous_team_id ?? null });
                         const groups = new Map<number, typeof segs>();
@@ -250,6 +251,11 @@ export function MainInfoCard({
                                           style={{ width: sizePx, height: sizePx }}
                                         />
                                       )}
+                                      {showTeamNameInline ? (
+                                        <div className="max-w-40 truncate text-xs font-semibold text-zinc-700 dark:text-zinc-200">
+                                          {seg.team.name}
+                                        </div>
+                                      ) : null}
                                     </HoverTooltip>
                                   ))}
                                 </div>
