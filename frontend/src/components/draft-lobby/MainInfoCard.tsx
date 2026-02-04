@@ -268,7 +268,7 @@ export function MainInfoCard({
                               ) : null}
                             </div>
                             <div className="mt-3 text-center text-sm font-semibold text-zinc-700 dark:text-zinc-200">
-                              {(c.yearLabel ?? "No constraint") === "No constraint" ? "Any" : (c.yearLabel ?? "Any")}
+                              {(c.yearLabel ?? "No constraint") === "No constraint" ? "Any year" : (c.yearLabel ?? "Any year")}
                             </div>
                             {c.nameLetter ? (
                               <div className="mt-1 text-center text-xs font-semibold text-zinc-600 dark:text-zinc-300">
