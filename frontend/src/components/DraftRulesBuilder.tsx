@@ -28,6 +28,7 @@ export function DraftRulesBuilder({
   const spinYear = rules.spin_fields.includes("year");
   const spinTeam = rules.spin_fields.includes("team");
   const spinNameLetter = rules.spin_fields.includes("name_letter");
+  const spinPlayer = rules.spin_fields.includes("player");
 
   const yearType = rules.year_constraint.type;
   const teamType = rules.team_constraint.type;
@@ -85,7 +86,7 @@ export function DraftRulesBuilder({
             Spin a name-letter constraint each pick
           </label>
           
-          {rules.spin_fields.includes("year") || rules.spin_fields.includes("team") || rules.spin_fields.includes("name_letter") ?  (
+          {rules.spin_fields.includes("year") || rules.spin_fields.includes("team") || rules.spin_fields.includes("name_letter") || rules.spin_fields.includes("player") ?  (
             <>  {/* if spin fields are on, show reroll options */}
           <label className="flex items-center gap-3 text-sm">
             <input
@@ -382,6 +383,17 @@ export function DraftRulesBuilder({
       <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-black">
         <div className="text-sm font-semibold">Player restrictions</div>
         <div className="mt-3 grid gap-2">
+        <label className="flex items-center gap-3 text-sm">
+            <input
+              type="checkbox"
+              checked={spinPlayer}
+              onChange={(e) => {
+                const next = e.target.checked ? addSpin(rules.spin_fields, "player") : removeSpin(rules.spin_fields, "player");
+                onChange({ ...rules, spin_fields: next });
+              }}
+            />
+            Spin players (Take or Reroll instead of searching)
+          </label>
         <label className="flex items-center gap-3 text-sm">
             <input
               type="checkbox"

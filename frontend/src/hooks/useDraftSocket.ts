@@ -46,6 +46,7 @@ type DraftWsMessage =
         yearEnd?: number | null;
         nameLetter?: string | null;
         namePart?: "first" | "last" | "either" | null;
+        player?: { id: number; name: string; image_url?: string | null } | null;
       } | null;
       pending_selection?: {
         host?: { id: number; name: string; image_url?: string | null } | null;
@@ -72,14 +73,14 @@ type DraftWsMessage =
       type: "roll_started";
       draft_id: number;
       by_role: "host" | "guest";
-      stage: "year" | "team" | "letter";
+      stage: "year" | "team" | "letter" | "player";
       year_label?: string;
     }
   | {
       type: "roll_stage_result";
       draft_id: number;
       by_role: "host" | "guest";
-      stage: "year" | "team" | "letter";
+      stage: "year" | "team" | "letter" | "player";
       constraint: {
         teams: ConstraintTeamSegmentWs[];
         yearLabel?: string | null;
@@ -87,6 +88,7 @@ type DraftWsMessage =
         yearEnd?: number | null;
         nameLetter?: string | null;
         namePart?: "first" | "last" | "either" | null;
+        player?: { id: number; name: string; image_url?: string | null } | null;
       };
     }
   | {
@@ -100,6 +102,7 @@ type DraftWsMessage =
         yearEnd?: number | null;
         nameLetter?: string | null;
         namePart?: "first" | "last" | "either" | null;
+        player?: { id: number; name: string; image_url?: string | null } | null;
       };
     }
   | { type: "roll_error"; draft_id: number; message: string }
@@ -131,7 +134,9 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
     }>
   >([]);
   const [lastError, setLastError] = useState<string | null>(null);
-  const [rollStage, setRollStage] = useState<null | "idle" | "spinning_decade" | "spinning_team" | "spinning_letter">(null);
+  const [rollStage, setRollStage] = useState<
+    null | "idle" | "spinning_decade" | "spinning_team" | "spinning_letter" | "spinning_player"
+  >(null);
   const [rollText, setRollText] = useState<string | null>(null);
   const [rollStageDecadeLabel, setRollStageDecadeLabel] = useState<string | null>(null);
   const [rollConstraint, setRollConstraint] = useState<{
@@ -141,6 +146,7 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
     yearEnd?: number | null;
     nameLetter?: string | null;
     namePart?: "first" | "last" | "either" | null;
+    player?: { id: number; name: string; image_url?: string | null } | null;
   } | null>(null);
   const [pendingSelection, setPendingSelection] = useState<{
     host: { id: number; name: string; image_url?: string | null } | null;
@@ -301,9 +307,12 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
             } else if (msg.stage === "team") {
               setRollStage("spinning_team");
               setRollText(`Spinning team… (${msg.year_label ?? ""})`);
-            } else {
+            } else if (msg.stage === "letter") {
               setRollStage("spinning_letter");
               setRollText("Spinning letter…");
+            } else {
+              setRollStage("spinning_player");
+              setRollText("Spinning player…");
             }
           } else if (msg.type === "roll_stage_result") {
             // Persist partial constraint so previous stages "stick" in the UI.

@@ -25,6 +25,8 @@ export function PlayerPickerPanel({
   canSearch,
   searchError,
   onPickPlayer,
+  playerSpinEnabled,
+  onReroll,
 }: {
   started: boolean;
   canPick: boolean;
@@ -45,6 +47,8 @@ export function PlayerPickerPanel({
   canSearch: boolean;
   searchError: string | null;
   onPickPlayer: (playerId: number) => void;
+  playerSpinEnabled: boolean;
+  onReroll: () => void;
 }) {
   const { getToken } = useAuth();
   const [q, setQ] = useState("");
@@ -104,6 +108,10 @@ export function PlayerPickerPanel({
 
   const otherRole = myRole === "host" ? "guest" : "host";
   const otherPending = pendingSelection?.[otherRole] ?? null;
+  const myPending = pendingSelection?.[myRole] ?? null;
+
+  const canTakeRolled = Boolean(started && canPick && !isSpinning && myPending && !drafted(myPending.id));
+  const canRerollRolled = Boolean(started && canPick && !isSpinning);
 
   function matchesNameLetter(name: string, letter: string, part: "first" | "last" | "either") {
     const L = letter.trim().toUpperCase();
@@ -260,6 +268,90 @@ export function PlayerPickerPanel({
     <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-900/50">
       {!started ? (
         <div className="text-sm text-zinc-600 dark:text-zinc-300">Waiting for the draft to start. The host will start the draft.</div>
+      ) : playerSpinEnabled ? (
+        <>
+          <div className="text-sm font-semibold">Your player</div>
+          <div className="mt-3 grid gap-3">
+            {!myPending ? (
+              <div className="rounded-xl border border-black/10 bg-black/5 p-3 text-sm text-zinc-700 dark:border-white/10 dark:bg-white/10 dark:text-zinc-200">
+                Roll to get a player, then choose Take or Reroll.
+              </div>
+            ) : (
+              <div className="rounded-xl border border-black/10 bg-black/5 p-3 dark:border-white/10 dark:bg-white/10">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <Image
+                      src={myPending.image_url ?? "/avatar-placeholder.svg"}
+                      alt={myPending.name}
+                      width={40}
+                      height={40}
+                      className="h-10 w-10 flex-none rounded-lg object-contain"
+                    />
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold">{myPending.name}</div>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => onReroll()}
+                      disabled={!canRerollRolled}
+                      className="h-10 whitespace-nowrap rounded-full border border-black/10 bg-white px-3 text-sm font-semibold text-zinc-950 hover:bg-black/5 disabled:opacity-60 dark:border-white/10 dark:bg-zinc-900 dark:text-white dark:hover:bg-zinc-800"
+                    >
+                      Reroll
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!canTakeRolled}
+                      onClick={() => {
+                        if (!myPending) return;
+                        onPickPlayer(myPending.id);
+                      }}
+                      className="h-10 whitespace-nowrap rounded-full bg-zinc-950 px-4 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-60 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
+                    >
+                      Take
+                    </button>
+                  </div>
+                </div>
+
+                {!canPick && currentTurn ? (
+                  <div className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">
+                    It’s {currentTurn}’s turn. {isLocal ? "Take will route automatically." : "Wait for your turn."}
+                  </div>
+                ) : null}
+
+                {myPending && drafted(myPending.id) ? (
+                  <div className="mt-2 text-xs text-red-700 dark:text-red-300">This player was already drafted. Please reroll.</div>
+                ) : null}
+              </div>
+            )}
+
+            {otherPending ? (
+              <div className="rounded-xl border border-black/10 bg-black/5 p-3 dark:border-white/10 dark:bg-white/10">
+                <div className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
+                  {otherRole === "host" ? "Host" : "Guest"} rolled…
+                </div>
+                <div className="mt-2 flex min-w-0 items-center gap-3">
+                  <Image
+                    src={otherPending.image_url ?? "/avatar-placeholder.svg"}
+                    alt={otherPending.name}
+                    width={40}
+                    height={40}
+                    className="h-10 w-10 flex-none rounded-lg object-contain"
+                  />
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold">{otherPending.name}</div>
+                    <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">Not confirmed yet</div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            <div className="text-xs text-zinc-500 dark:text-zinc-400">
+              Reroll uses the same reroll pool as the other spinners (if enabled).
+            </div>
+          </div>
+        </>
       ) : (
         <>
           <div className="text-sm font-semibold">Pick a player</div>

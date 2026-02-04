@@ -73,6 +73,8 @@ def _stage_order_from_rules(rules: dict) -> list[str]:
         out.append("team")
     if "name_letter" in spin_fields:
         out.append("letter")
+    if "player" in spin_fields:
+        out.append("player")
     return out
 
 
@@ -233,6 +235,407 @@ async def _roll_letter(
         if not viable:
             viable = pool
         return random.choice(viable), name_part
+
+
+def _team_franchise_root_id(team_id: int, prev_by_id: dict[int, int | None]) -> int:
+    """
+    Follow Team.previous_team_id links to get a stable franchise root id.
+    Includes cycle protection.
+    """
+    cur = team_id
+    seen: set[int] = set()
+    while cur not in seen:
+        seen.add(cur)
+        prev = prev_by_id.get(cur)
+        if not prev:
+            break
+        cur = prev
+    return cur
+
+
+def _coalesced_team_stint_count(*, stint_team_ids_in_order: list[int], prev_by_id: dict[int, int | None]) -> int:
+    """
+    Count stints after coalescing consecutive stints that belong to the same franchise.
+    Example: SEA->OKC with no other team between counts as 1.
+    """
+    last_root: int | None = None
+    count = 0
+    for team_id in stint_team_ids_in_order:
+        root = _team_franchise_root_id(team_id, prev_by_id)
+        if last_root is None or root != last_root:
+            count += 1
+            last_root = root
+    return count
+
+
+def _parse_static_year_constraint(rules: dict) -> tuple[str, int | None, int | None]:
+    """
+    Resolve non-spun year constraints into a (label, start, end) tuple.
+    Mirrors the frontend's "staticYear" behavior:
+    - any => no constraint
+    - range => fixed start/end
+    - decade (single option) => fixed decade
+    - specific (single option) => fixed year
+    - otherwise => treat as no constraint
+    """
+    yc = rules.get("year_constraint") if isinstance(rules.get("year_constraint"), dict) else {}
+    t = yc.get("type")
+    opts = yc.get("options")
+    if t == "any":
+        return ("No constraint", None, None)
+    if t == "range" and isinstance(opts, dict):
+        start = opts.get("startYear")
+        end = opts.get("endYear")
+        if isinstance(start, int) and isinstance(end, int):
+            return (f"{start}-{end}", start, end)
+        return ("No constraint", None, None)
+    if t == "decade" and isinstance(opts, list) and len(opts) == 1 and isinstance(opts[0], str):
+        label = str(opts[0])
+        parsed = _parse_decade_label(label)
+        if parsed:
+            start, end = parsed
+            return (label, start, end)
+        return (label, None, None)
+    if t == "specific" and isinstance(opts, list) and len(opts) == 1:
+        try:
+            y = int(opts[0])
+            return (str(y), y, y)
+        except Exception:  # noqa: BLE001
+            return ("No constraint", None, None)
+    return ("No constraint", None, None)
+
+
+def _parse_static_name_letter_constraint(rules: dict) -> tuple[str | None, str]:
+    """
+    Resolve non-spun name-letter constraints into (letter, part).
+    Mirrors the frontend: only a single fixed letter is treated as a constraint.
+    """
+    name_part = rules.get("name_letter_part") if isinstance(rules.get("name_letter_part"), str) else "first"
+    if name_part not in ("first", "last", "either"):
+        name_part = "first"
+    nc = rules.get("name_letter_constraint") if isinstance(rules.get("name_letter_constraint"), dict) else {}
+    if nc.get("type") != "specific" or not isinstance(nc.get("options"), list):
+        return (None, name_part)
+    letters = [str(x).strip().upper() for x in nc.get("options") if isinstance(x, str)]
+    letters = [x for x in letters if len(x) == 1 and x.isalpha()]
+    if len(letters) != 1:
+        return (None, name_part)
+    return (letters[0], name_part)
+
+
+async def _resolve_static_team_segments(*, rules: dict, year_start: int | None, year_end: int | None) -> list[dict]:
+    """
+    Resolve non-spun team constraints into a list of team segments (for eligibility filtering + UI display).
+    """
+    team_constraint = rules.get("team_constraint") if isinstance(rules.get("team_constraint"), dict) else {}
+    tc_type = team_constraint.get("type")
+    tc_options = team_constraint.get("options")
+    async with SessionLocal() as db:
+        stmt = select(Team)
+        if year_start is not None and year_end is not None:
+            stmt = stmt.where(
+                and_(
+                    or_(Team.founded_year.is_(None), Team.founded_year <= year_end),
+                    or_(Team.dissolved_year.is_(None), Team.dissolved_year >= year_start),
+                )
+            )
+        if tc_type == "conference" and isinstance(tc_options, list) and tc_options:
+            stmt = stmt.where(Team.conference.in_([str(x) for x in tc_options]))
+        elif tc_type == "division" and isinstance(tc_options, list) and tc_options:
+            stmt = stmt.where(Team.division.in_([str(x) for x in tc_options]))
+        elif tc_type == "specific" and isinstance(tc_options, list) and tc_options:
+            stmt = stmt.where(Team.abbreviation.in_([str(x) for x in tc_options]))
+        else:
+            return []
+        teams = (await db.execute(stmt)).scalars().all()
+        teams.sort(key=lambda t: (t.name or "", t.id))
+        return [
+            {
+                "team": {
+                    "id": t.id,
+                    "name": t.name,
+                    "abbreviation": t.abbreviation,
+                    "logo_url": t.logo_url,
+                    "previous_team_id": t.previous_team_id,
+                    "founded_year": t.founded_year,
+                    "dissolved_year": t.dissolved_year,
+                },
+                "startYear": None,
+                "endYear": None,
+            }
+            for t in teams
+        ]
+
+
+async def _drafted_player_ids(*, draft_id: int) -> set[int]:
+    async with SessionLocal() as db:
+        rows = (await db.execute(select(DraftPick.player_id).where(DraftPick.draft_id == draft_id))).all()
+        return {int(r[0]) for r in rows if r and r[0] is not None}
+
+
+def _apply_active_retired_filters(stmt, *, rules: dict):
+    allow_active = rules.get("allow_active", True)
+    allow_retired = rules.get("allow_retired", True)
+    allow_active = bool(True if allow_active is None else allow_active)
+    allow_retired = bool(True if allow_retired is None else allow_retired)
+    if not allow_active and not allow_retired:
+        # Caller should surface a useful error.
+        return stmt.where(False)
+    if not allow_active:
+        stmt = stmt.where(Player.retirement_year.is_not(None))
+    elif not allow_retired:
+        stmt = stmt.where(Player.retirement_year.is_(None))
+    return stmt
+
+
+async def _count_viable_players_for_letter(
+    *,
+    drafted_player_ids: set[int],
+    rules: dict,
+    year_start: int | None,
+    year_end: int | None,
+    team_ids: list[int],
+    name_clause,
+    min_needed: int,
+) -> int:
+    """
+    Count players that match all eligibility filters for a given name-letter clause,
+    excluding already-drafted players. If min/max team stints are set, count is computed
+    via batch stint scanning (stops early once min_needed is met).
+    """
+    from app.models import PlayerTeamStint  # local import to avoid circular
+
+    min_team_stints = rules.get("min_team_stints")
+    max_team_stints = rules.get("max_team_stints")
+    try:
+        min_team_stints = int(min_team_stints) if min_team_stints is not None else None
+    except Exception:  # noqa: BLE001
+        min_team_stints = None
+    try:
+        max_team_stints = int(max_team_stints) if max_team_stints is not None else None
+    except Exception:  # noqa: BLE001
+        max_team_stints = None
+
+    use_stint_count = min_team_stints is not None or max_team_stints is not None
+
+    current_year = datetime.now(timezone.utc).year
+    async with SessionLocal() as db:
+        base_ids = select(Player.id).where(name_clause)
+        base_ids = _apply_active_retired_filters(base_ids, rules=rules)
+        if drafted_player_ids:
+            base_ids = base_ids.where(Player.id.not_in(drafted_player_ids))
+
+        if team_ids or (year_start is not None and year_end is not None):
+            stint_exists = exists().where(PlayerTeamStint.player_id == Player.id)
+            if team_ids:
+                stint_exists = stint_exists.where(PlayerTeamStint.team_id.in_(team_ids))
+            if year_start is not None and year_end is not None:
+                stint_exists = stint_exists.where(
+                    PlayerTeamStint.start_year <= year_end,
+                    func.coalesce(PlayerTeamStint.end_year, Player.retirement_year, current_year) >= year_start,
+                )
+            base_ids = base_ids.where(stint_exists)
+
+        if not use_stint_count:
+            cnt = (await db.execute(select(func.count()).select_from(base_ids.subquery()))).scalar_one()
+            return int(cnt)
+
+        if min_team_stints is not None and max_team_stints is not None and min_team_stints > max_team_stints:
+            return 0
+
+        # Load team->previous mapping once (teams table is small).
+        team_rows = (await db.execute(select(Team.id, Team.previous_team_id))).all()
+        prev_by_id: dict[int, int | None] = {int(tid): (int(prev) if prev is not None else None) for (tid, prev) in team_rows}
+
+        # Scan eligible ids in batches; compute coalesced stint counts in batch.
+        total = 0
+        offset = 0
+        batch_size = 500
+        safety_iters = 0
+        while total < min_needed and safety_iters < 40:
+            safety_iters += 1
+            batch_ids = (await db.execute(base_ids.order_by(Player.id.asc()).limit(batch_size).offset(offset))).scalars().all()
+            if not batch_ids:
+                break
+            offset += len(batch_ids)
+
+            stint_rows = (
+                await db.execute(
+                    select(PlayerTeamStint.player_id, PlayerTeamStint.team_id)
+                    .where(PlayerTeamStint.player_id.in_(batch_ids))
+                    .order_by(PlayerTeamStint.player_id.asc(), PlayerTeamStint.start_year.asc())
+                )
+            ).all()
+
+            counts: dict[int, int] = {int(pid): 0 for pid in batch_ids}
+            cur_pid: int | None = None
+            last_root: int | None = None
+            for pid_raw, team_id_raw in stint_rows:
+                pid = int(pid_raw)
+                team_id = int(team_id_raw)
+                if cur_pid != pid:
+                    cur_pid = pid
+                    last_root = None
+                root = _team_franchise_root_id(team_id, prev_by_id)
+                if last_root is None or root != last_root:
+                    counts[pid] = counts.get(pid, 0) + 1
+                    last_root = root
+
+            for pid in batch_ids:
+                c = counts.get(int(pid), 0)
+                if min_team_stints is not None and c < min_team_stints:
+                    continue
+                if max_team_stints is not None and c > max_team_stints:
+                    continue
+                total += 1
+                if total >= min_needed:
+                    break
+        return total
+
+
+async def _roll_player(
+    *,
+    draft_id: int,
+    drafted_player_ids: set[int],
+    rules: dict,
+    year_start: int | None,
+    year_end: int | None,
+    team_segments: list[dict],
+    name_letter: str | None,
+    name_part: str,
+) -> dict:
+    """
+    Select a random eligible, undrafted player matching the current constraint.
+    """
+    from app.models import PlayerTeamStint  # local import to avoid circular
+
+    current_year = datetime.now(timezone.utc).year
+
+    # Extract team ids
+    team_ids: list[int] = []
+    for s in team_segments:
+        if isinstance(s, dict) and isinstance(s.get("team"), dict):
+            tid = s["team"].get("id")
+            if isinstance(tid, int):
+                team_ids.append(tid)
+    team_ids = sorted(set(team_ids))
+
+    min_team_stints = rules.get("min_team_stints")
+    max_team_stints = rules.get("max_team_stints")
+    try:
+        min_team_stints = int(min_team_stints) if min_team_stints is not None else None
+    except Exception:  # noqa: BLE001
+        min_team_stints = None
+    try:
+        max_team_stints = int(max_team_stints) if max_team_stints is not None else None
+    except Exception:  # noqa: BLE001
+        max_team_stints = None
+
+    if min_team_stints is not None and max_team_stints is not None and min_team_stints > max_team_stints:
+        raise RuntimeError("Invalid player stint-count constraint (min > max)")
+
+    use_stint_count = min_team_stints is not None or max_team_stints is not None
+
+    # Name letter clause (optional)
+    name_clause = True
+    if name_letter and isinstance(name_letter, str):
+        L = name_letter.strip().upper()
+        if len(L) == 1 and L.isalpha():
+            first_letter_expr = func.upper(func.substr(Player.name, 1, 1))
+            last_letter_expr = func.upper(func.substr(func.split_part(Player.name, " ", 2), 1, 1))
+            if name_part == "last":
+                name_clause = last_letter_expr == L
+            elif name_part == "either":
+                name_clause = or_(first_letter_expr == L, last_letter_expr == L)
+            else:
+                name_clause = first_letter_expr == L
+
+    async with SessionLocal() as db:
+        ids_stmt = select(Player.id).where(name_clause)
+        ids_stmt = _apply_active_retired_filters(ids_stmt, rules=rules)
+        if drafted_player_ids:
+            ids_stmt = ids_stmt.where(Player.id.not_in(drafted_player_ids))
+
+        if team_ids or (year_start is not None and year_end is not None):
+            stint_exists = exists().where(PlayerTeamStint.player_id == Player.id)
+            if team_ids:
+                stint_exists = stint_exists.where(PlayerTeamStint.team_id.in_(team_ids))
+            if year_start is not None and year_end is not None:
+                stint_exists = stint_exists.where(
+                    PlayerTeamStint.start_year <= year_end,
+                    func.coalesce(PlayerTeamStint.end_year, Player.retirement_year, current_year) >= year_start,
+                )
+            ids_stmt = ids_stmt.where(stint_exists)
+
+        # Fast path when stint-count filter isn't used.
+        if not use_stint_count:
+            cnt = int((await db.execute(select(func.count()).select_from(ids_stmt.subquery()))).scalar_one())
+            if cnt <= 0:
+                raise RuntimeError("No eligible players available for that constraint")
+            off = random.randrange(cnt)
+            pid = (await db.execute(ids_stmt.order_by(Player.id.asc()).limit(1).offset(off))).scalar_one_or_none()
+            if pid is None:
+                raise RuntimeError("No eligible players available for that constraint")
+            player = await db.get(Player, int(pid))
+            if not player:
+                raise RuntimeError("No eligible players available for that constraint")
+            return {"id": player.id, "name": player.name, "image_url": player.image_url}
+
+        # Stint-count path: scan ids in batches and pick randomly among the first N matches.
+        team_rows = (await db.execute(select(Team.id, Team.previous_team_id))).all()
+        prev_by_id: dict[int, int | None] = {int(tid): (int(prev) if prev is not None else None) for (tid, prev) in team_rows}
+
+        matching: list[int] = []
+        offset = 0
+        batch_size = 500
+        safety_iters = 0
+        while len(matching) < 80 and safety_iters < 60:
+            safety_iters += 1
+            batch_ids = (await db.execute(ids_stmt.order_by(Player.id.asc()).limit(batch_size).offset(offset))).scalars().all()
+            if not batch_ids:
+                break
+            offset += len(batch_ids)
+
+            stint_rows = (
+                await db.execute(
+                    select(PlayerTeamStint.player_id, PlayerTeamStint.team_id)
+                    .where(PlayerTeamStint.player_id.in_(batch_ids))
+                    .order_by(PlayerTeamStint.player_id.asc(), PlayerTeamStint.start_year.asc())
+                )
+            ).all()
+
+            counts: dict[int, int] = {int(pid): 0 for pid in batch_ids}
+            cur_pid: int | None = None
+            last_root: int | None = None
+            for pid_raw, team_id_raw in stint_rows:
+                pid_i = int(pid_raw)
+                team_id_i = int(team_id_raw)
+                if cur_pid != pid_i:
+                    cur_pid = pid_i
+                    last_root = None
+                root = _team_franchise_root_id(team_id_i, prev_by_id)
+                if last_root is None or root != last_root:
+                    counts[pid_i] = counts.get(pid_i, 0) + 1
+                    last_root = root
+
+            for pid in batch_ids:
+                c = counts.get(int(pid), 0)
+                if min_team_stints is not None and c < min_team_stints:
+                    continue
+                if max_team_stints is not None and c > max_team_stints:
+                    continue
+                matching.append(int(pid))
+                if len(matching) >= 80:
+                    break
+
+        if not matching:
+            raise RuntimeError("No eligible players available for that constraint")
+
+        pid = random.choice(matching)
+        player = await db.get(Player, pid)
+        if not player:
+            raise RuntimeError("No eligible players available for that constraint")
+        return {"id": player.id, "name": player.name, "image_url": player.image_url}
 
 def _parse_draft_ref(draft_ref: str) -> tuple[str, object]:
     try:
@@ -481,6 +884,8 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
         if not stages:
             return
 
+        drafted_ids = await _drafted_player_ids(draft_id=draft_id)
+
         # Sequential stages: each stage rolls ONE thing and persists it.
         year_label: str = "No constraint"
         year_start: int | None = None
@@ -490,6 +895,16 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
         name_part: str = rules.get("name_letter_part") if isinstance(rules.get("name_letter_part"), str) else "first"
         if name_part not in ("first", "last", "either"):
             name_part = "first"
+        rolled_player: dict | None = None
+
+        # Seed static constraints for fields that are NOT spun.
+        if "year" not in stages:
+            year_label, year_start, year_end = _parse_static_year_constraint(rules)
+        if "letter" not in stages:
+            name_letter, name_part = _parse_static_name_letter_constraint(rules)
+        # If team isn't spun, still apply any fixed team restriction (optionally filtered by the current year window).
+        if "team" not in stages:
+            team_segments = await _resolve_static_team_segments(rules=rules, year_start=year_start, year_end=year_end)
 
         def current_constraint() -> dict:
             return {
@@ -499,6 +914,7 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
                 "teams": team_segments,
                 "nameLetter": name_letter,
                 "namePart": name_part,
+                "player": rolled_player,
             }
 
         for st in stages:
@@ -507,10 +923,72 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
             try:
                 if st == "year":
                     year_label, year_start, year_end = await _roll_year(rules)
+                    # If team is not spun, refresh static teams to respect the rolled year window.
+                    if "team" not in stages:
+                        team_segments = await _resolve_static_team_segments(rules=rules, year_start=year_start, year_end=year_end)
                 elif st == "team":
                     team_segments = await _roll_team(year_start=year_start, year_end=year_end, rules=rules)
+                elif st == "letter":
+                    # Filter the letter pool to only those with enough viable players.
+                    team_ids: list[int] = []
+                    for s in team_segments:
+                        if isinstance(s, dict) and isinstance(s.get("team"), dict):
+                            tid = s["team"].get("id")
+                            if isinstance(tid, int):
+                                team_ids.append(tid)
+                    team_ids = sorted(set(team_ids))
+
+                    pool: list[str] = []
+                    name_constraint = rules.get("name_letter_constraint") if isinstance(rules.get("name_letter_constraint"), dict) else {}
+                    if name_constraint.get("type") == "specific" and isinstance(name_constraint.get("options"), list):
+                        pool = [str(x).strip().upper() for x in name_constraint.get("options") if isinstance(x, str)]
+                        pool = [x for x in pool if len(x) == 1 and x.isalpha()]
+                    if not pool:
+                        pool = [chr(c) for c in range(ord("A"), ord("Z") + 1)]
+
+                    min_players = rules.get("name_letter_min_options")
+                    try:
+                        min_players = int(min_players)
+                    except Exception:  # noqa: BLE001
+                        min_players = 1
+                    min_players = max(1, min_players)
+
+                    first_letter_expr = func.upper(func.substr(Player.name, 1, 1))
+                    last_letter_expr = func.upper(func.substr(func.split_part(Player.name, " ", 2), 1, 1))
+
+                    viable: list[str] = []
+                    for L in pool:
+                        if name_part == "last":
+                            name_clause = last_letter_expr == L
+                        elif name_part == "either":
+                            name_clause = or_(first_letter_expr == L, last_letter_expr == L)
+                        else:
+                            name_clause = first_letter_expr == L
+                        cnt = await _count_viable_players_for_letter(
+                            drafted_player_ids=drafted_ids,
+                            rules=rules,
+                            year_start=year_start,
+                            year_end=year_end,
+                            team_ids=team_ids,
+                            name_clause=name_clause,
+                            min_needed=min_players,
+                        )
+                        if cnt >= min_players:
+                            viable.append(L)
+                    if not viable:
+                        viable = pool
+                    name_letter = random.choice(viable)
                 else:
-                    name_letter, name_part = await _roll_letter(rules=rules, year_start=year_start, year_end=year_end, team_segments=team_segments)
+                    rolled_player = await _roll_player(
+                        draft_id=draft_id,
+                        drafted_player_ids=drafted_ids,
+                        rules=rules,
+                        year_start=year_start,
+                        year_end=year_end,
+                        team_segments=team_segments,
+                        name_letter=name_letter,
+                        name_part=name_part,
+                    )
             except RuntimeError as e:
                 await draft_manager.broadcast(session, {"type": "roll_error", "draft_id": draft_id, "message": str(e)})
                 break
@@ -531,6 +1009,15 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
             final_constraint = session.current_constraint
         if final_constraint:
             await draft_manager.broadcast(session, {"type": "roll_result", "draft_id": draft_id, "by_role": by_role, "constraint": final_constraint})
+            # If we rolled a player, treat it as the active "pending selection" for that role.
+            player_payload = final_constraint.get("player") if isinstance(final_constraint, dict) else None
+            if isinstance(player_payload, dict) and isinstance(player_payload.get("id"), int):
+                async with session.lock:
+                    session.pending_selection[by_role] = player_payload
+                await draft_manager.broadcast(
+                    session,
+                    {"type": "pending_selection_updated", "draft_id": draft_id, "role": by_role, "player": player_payload},
+                )
 
     try:
         while True:

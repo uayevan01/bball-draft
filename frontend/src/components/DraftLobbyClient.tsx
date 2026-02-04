@@ -20,6 +20,7 @@ import type {
   DraftPickWs,
   EligibilityConstraint,
   PlayerDetail,
+  PlayerSearchResult,
   SpinPreviewTeam,
   TeamLite,
 } from "@/components/draft-lobby/types";
@@ -41,6 +42,8 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
   const [spinPreviewDecade, setSpinPreviewDecade] = useState<string | null>(null);
   const [spinPreviewTeam, setSpinPreviewTeam] = useState<SpinPreviewTeam | null>(null);
   const [spinPreviewLetter, setSpinPreviewLetter] = useState<string | null>(null);
+  const [spinPreviewPlayer, setSpinPreviewPlayer] = useState<PlayerSearchResult | null>(null);
+  const [warmPlayerPool, setWarmPlayerPool] = useState<PlayerSearchResult[]>([]);
 
   // Load backend user + draft so we can auto-assign roles for non-local lobbies.
   useEffect(() => {
@@ -120,6 +123,12 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
   const picks = stateSocket.picks;
   const lastError = stateSocket.lastError;
 
+  const draftedIds = useMemo(() => {
+    const ids = new Set<number>();
+    for (const p of picks) ids.add(p.player_id);
+    return ids;
+  }, [picks]);
+
   // When a guest joins, the host's initial REST-loaded `draft` object may still have guest=null.
   // The WS connection state updates immediately, so use that as a signal to refresh draft participants.
   useEffect(() => {
@@ -166,11 +175,13 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
   const [hostSettingsModalOpen, setHostSettingsModalOpen] = useState(false);
   const [staticTeamsError, setStaticTeamsError] = useState<string | null>(null);
 
-  const isSpinning = rollStage === "spinning_decade" || rollStage === "spinning_team" || rollStage === "spinning_letter";
+  const isSpinning =
+    rollStage === "spinning_decade" || rollStage === "spinning_team" || rollStage === "spinning_letter" || rollStage === "spinning_player";
   const spinsYear = Boolean(rules?.spin_fields?.includes("year"));
   const spinsTeam = Boolean(rules?.spin_fields?.includes("team"));
   const spinsNameLetter = Boolean(rules?.spin_fields?.includes("name_letter"));
-  const usesRoll = spinsYear || spinsTeam || spinsNameLetter;
+  const spinsPlayer = Boolean(rules?.spin_fields?.includes("player"));
+  const usesRoll = spinsYear || spinsTeam || spinsNameLetter || spinsPlayer;
 
   const staticTeamConstraint = useMemo(() => {
     if (usesRoll) return null;
@@ -330,9 +341,29 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
 
   const constraintReady = !hasAnyConstraintRule || Boolean(eligibilityConstraint);
   // Searching should stay enabled even when it's not your turn; only selecting/confirming is gated by canPick.
-  const canSearch = Boolean(started && !isSpinning && constraintReady);
+  const canSearch = Boolean(started && !isSpinning && constraintReady && !spinsPlayer);
 
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
+
+  // Warm pool for player-spin animation: fetch once so the FIRST player spin can animate immediately
+  // (constraint-specific pool is still fetched at spin time and cached via warmPlayerPool for rerolls).
+  useEffect(() => {
+    let cancelled = false;
+    async function run() {
+      try {
+        const token = await getToken().catch(() => null);
+        const data = await backendGet<PlayerSearchResult[]>(`/players?limit=200`, token);
+        if (cancelled) return;
+        setWarmPlayerPool((data ?? []).filter((p) => !draftedIds.has(p.id)));
+      } catch {
+        // ignore; spinner will still work, just without warm animation pool
+      }
+    }
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [getToken, draftedIds]);
 
   useEffect(() => {
     let cancelled = false;
@@ -364,7 +395,68 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
       setSpinPreviewDecade(null);
       setSpinPreviewTeam(null);
       setSpinPreviewLetter(null);
+      setSpinPreviewPlayer(null);
       return;
+    }
+    if (rollStage === "spinning_player") {
+      // Player animation: fetch an eligible pool and cycle through images.
+      setSpinPreviewDecade(null);
+      setSpinPreviewTeam(null);
+      setSpinPreviewLetter(null);
+      setSpinPreviewPlayer(null);
+
+      const cancelledRef = { cancelled: false };
+
+      // Start animating immediately from the warm pool (or last fetched pool) so the user
+      // sees motion right away on the first roll.
+      const immediatePool = (warmPlayerPool ?? []).filter((p) => !draftedIds.has(p.id));
+      if (immediatePool.length) {
+        scheduleSpin<PlayerSearchResult>(immediatePool, (v) => setSpinPreviewPlayer(v), 1100, 90, cancelledRef);
+      }
+
+      async function startPlayerSpin() {
+        try {
+          // Use the current constraint (from prior stages) to build a viable player pool.
+          // We intentionally ignore the "only eligible" toggle here; spinner should show eligible values only.
+          const c = eligibilityConstraint;
+          if (!c) return;
+
+          const params = new URLSearchParams();
+          params.set("limit", "200");
+
+          const ids = (c.teams ?? []).map((t) => t.team.id).filter((x) => Number.isFinite(x));
+          if (ids.length === 1) params.set("stint_team_id", String(ids[0]));
+          if (ids.length > 1) params.set("stint_team_ids", ids.join(","));
+          if (c.yearStart != null && c.yearEnd != null) {
+            params.set("stint_start_year", String(c.yearStart));
+            params.set("stint_end_year", String(c.yearEnd));
+          }
+          if (c.nameLetter) {
+            params.set("name_letters", String(c.nameLetter));
+            params.set("name_part", String(c.namePart ?? "first"));
+          }
+          if (c.allowActive === false) params.set("include_active", "false");
+          if (c.allowRetired === false) params.set("include_retired", "false");
+          if (c.minTeamStints != null) params.set("min_team_stints", String(c.minTeamStints));
+          if (c.maxTeamStints != null) params.set("max_team_stints", String(c.maxTeamStints));
+
+          const token = await getToken().catch(() => null);
+          const data = await backendGet<PlayerSearchResult[]>(`/players?${params.toString()}`, token);
+          if (cancelledRef.cancelled) return;
+          const pool = (data ?? []).filter((p) => !draftedIds.has(p.id));
+          if (!pool.length) return;
+
+          // Cache the constraint-specific pool for future rerolls (and to keep the warm pool "fresh").
+          setWarmPlayerPool(pool);
+        } catch {
+          // ignore animation fetch errors; final result still comes from server
+        }
+      }
+      void startPlayerSpin();
+
+      return () => {
+        cancelledRef.cancelled = true;
+      };
     }
 
     // Exponential slowdown (mirrors nba_draft.py ease_in_expo scheduling)
@@ -484,7 +576,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
     };
     // We intentionally depend on rollStage + isSpinning; preview updates are internal.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [usesRoll, isSpinning, rollStage]);
+  }, [usesRoll, isSpinning, rollStage, eligibilityConstraint, draftedIds, getToken, warmPlayerPool]);
 
   // Show a short-lived "X has selected Y" message when a new pick is made.
   useEffect(() => {
@@ -532,12 +624,9 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
   const [detailsByPlayerId, setDetailsByPlayerId] = useState<Record<number, PlayerDetail | undefined>>({});
   const [detailsLoadingByPlayerId, setDetailsLoadingByPlayerId] = useState<Record<number, boolean | undefined>>({});
 
-  const pickedPlayerIds = useMemo(() => {
-    const ids = new Set<number>();
-    for (const p of picks) ids.add(p.player_id);
-    return Array.from(ids.values());
-  }, [picks]);
-  const draftedIds = useMemo(() => new Set<number>(pickedPlayerIds), [pickedPlayerIds]);
+  const pickedPlayerIds = useMemo(() => Array.from(draftedIds.values()), [draftedIds]);
+  // draftedIds is defined earlier (right after picks). Keep this for compatibility of older code blocks:
+  // const draftedIds = useMemo(() => new Set<number>(pickedPlayerIds), [pickedPlayerIds]);
 
   async function ensurePlayerDetails(playerId: number) {
     if (detailsByPlayerId[playerId]) return;
@@ -662,6 +751,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
           spinPreviewDecade={spinPreviewDecade}
           spinPreviewTeam={spinPreviewTeam}
           spinPreviewLetter={spinPreviewLetter}
+          spinPreviewPlayer={spinPreviewPlayer}
           rollStageDecadeLabel={rollStageDecadeLabel}
           constraint={eligibilityConstraint}
         />
@@ -737,6 +827,8 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
                 constraint_year: eligibilityConstraint?.yearLabel ?? null,
               });
             }}
+            playerSpinEnabled={spinsPlayer}
+            onReroll={() => pickSocket.roll()}
           />
         ) : null}
 

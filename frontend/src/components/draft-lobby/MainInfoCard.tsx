@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 
-import type { EligibilityConstraint, SpinPreviewTeam } from "./types";
+import type { EligibilityConstraint, PlayerSearchResult, SpinPreviewTeam } from "./types";
 
 export function MainInfoCard({
   isLocal,
@@ -19,6 +19,7 @@ export function MainInfoCard({
   spinPreviewDecade,
   spinPreviewTeam,
   spinPreviewLetter,
+  spinPreviewPlayer,
   rollStageDecadeLabel,
   constraint,
 }: {
@@ -33,10 +34,11 @@ export function MainInfoCard({
   onRoll: () => void;
   showConstraint: boolean;
   isSpinning: boolean;
-  rollStage: null | "idle" | "spinning_decade" | "spinning_team" | "spinning_letter";
+  rollStage: null | "idle" | "spinning_decade" | "spinning_team" | "spinning_letter" | "spinning_player";
   spinPreviewDecade: string | null;
   spinPreviewTeam: SpinPreviewTeam | null;
   spinPreviewLetter: string | null;
+  spinPreviewPlayer: PlayerSearchResult | null;
   rollStageDecadeLabel: string | null;
   constraint: EligibilityConstraint | null;
 }) {
@@ -145,6 +147,14 @@ export function MainInfoCard({
                           <div className="h-24 w-24" />
                         );
                       })()
+                    ) : rollStage === "spinning_player" ? (
+                      <Image
+                        src={spinPreviewPlayer?.image_url ?? "/avatar-placeholder.svg"}
+                        alt={spinPreviewPlayer?.name ?? "Player"}
+                        width={96}
+                        height={96}
+                        className="h-24 w-24 rounded-2xl object-contain"
+                      />
                     ) : (
                       <div className="h-24 w-24" />
                     )}
@@ -153,24 +163,36 @@ export function MainInfoCard({
                         ? "SPINNING YEAR"
                         : rollStage === "spinning_team"
                           ? "SPINNING TEAM"
-                          : "SPINNING LETTER"}
+                          : rollStage === "spinning_letter"
+                            ? "SPINNING LETTER"
+                            : "SPINNING PLAYER"}
                     </div>
                     <div className="text-lg font-semibold text-zinc-950 dark:text-white">
                       {rollStage === "spinning_decade"
-                        ? spinPreviewDecade ?? "—"
+                        ? spinPreviewDecade ?? "Any"
                         : rollStage === "spinning_team"
-                          ? spinPreviewTeam?.name ?? "—"
-                          : spinPreviewLetter ?? "—"}
+                          ? spinPreviewTeam?.name ?? "Any"
+                          : rollStage === "spinning_letter"
+                            ? spinPreviewLetter ?? "Any"
+                            : spinPreviewPlayer?.name ?? "Any"}
                     </div>
                     <div className="text-sm text-zinc-700 dark:text-zinc-200">
                       {rollStage === "spinning_team" ? (
-                        `(${rollStageDecadeLabel ?? constraint?.yearLabel ?? "—"})`
+                        `(${rollStageDecadeLabel ?? constraint?.yearLabel ?? "Any"})`
                       ) : rollStage === "spinning_letter" ? (
                         (() => {
-                          const year = constraint?.yearLabel ?? "—";
+                          const year = constraint?.yearLabel ?? "Any";
                           const seg = constraint?.teams?.length ? constraint.teams[constraint.teams.length - 1] : null;
-                          const team = seg?.team?.abbreviation ?? seg?.team?.name ?? "—";
+                          const team = seg?.team?.abbreviation ?? seg?.team?.name ?? "Any";
                           return `Year: ${year} • Team: ${team}`;
+                        })()
+                      ) : rollStage === "spinning_player" ? (
+                        (() => {
+                          const year = constraint?.yearLabel ?? "Any";
+                          const seg = constraint?.teams?.length ? constraint.teams[constraint.teams.length - 1] : null;
+                          const team = seg?.team?.abbreviation ?? seg?.team?.name ?? "Any";
+                          const letter = constraint?.nameLetter ?? "Any";
+                          return `Year: ${year} • Team: ${team} • Letter: ${letter}`;
                         })()
                       ) : (
                         " "
@@ -221,8 +243,27 @@ export function MainInfoCard({
                           ))}
                         </div>
                       ))}
+                      {constraint.player ? (
+                        <div className="grid justify-items-center gap-1">
+                          <Image
+                            src={constraint.player.image_url ?? "/avatar-placeholder.svg"}
+                            alt={constraint.player.name}
+                            width={sizePx}
+                            height={sizePx}
+                            className="rounded-2xl object-contain"
+                            style={{ width: sizePx, height: sizePx }}
+                          />
+                          {showNames ? (
+                            <div className="max-w-40 truncate text-xs font-semibold text-zinc-800 dark:text-zinc-200">
+                              {constraint.player.name}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </div>
-                    <div className="text-base font-semibold text-zinc-700 dark:text-zinc-200">{constraint.yearLabel ?? "No constraint"}</div>
+                    <div className="text-base font-semibold text-zinc-700 dark:text-zinc-200">
+                      {(constraint.yearLabel ?? "No constraint") === "No constraint" ? "Any" : (constraint.yearLabel ?? "Any")}
+                    </div>
                     {constraint.nameLetter ? (
                       <div className="text-sm font-semibold text-zinc-700 dark:text-zinc-200">
                         {(constraint.namePart ?? "first")} name starts with{" "}

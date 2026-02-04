@@ -17,7 +17,7 @@ export type NameLetterConstraint =
 export type NameLetterPart = "first" | "last" | "either";
 
 export type DraftRules = {
-  spin_fields: ("year" | "team" | "name_letter")[];
+  spin_fields: ("year" | "team" | "name_letter" | "player")[];
   year_constraint: YearConstraint;
   team_constraint: TeamConstraint;
   name_letter_constraint: NameLetterConstraint;

@@ -40,6 +40,7 @@ export type EligibilityConstraint = {
   yearEnd?: number | null;
   nameLetter?: string | null;
   namePart?: "first" | "last" | "either" | null;
+  player?: { id: number; name: string; image_url?: string | null } | null;
   allowActive?: boolean | null;
   allowRetired?: boolean | null;
   minTeamStints?: number | null;
