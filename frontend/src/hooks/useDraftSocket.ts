@@ -18,6 +18,18 @@ type ConstraintTeamSegmentWs = {
   endYear?: number | null;
 };
 
+type ConstraintWsOption = {
+  teams: ConstraintTeamSegmentWs[];
+  yearLabel?: string | null;
+  yearStart?: number | null;
+  yearEnd?: number | null;
+  nameLetter?: string | null;
+  namePart?: "first" | "last" | "either" | null;
+  player?: { id: number; name: string; image_url?: string | null } | null;
+};
+
+type ConstraintWs = ConstraintWsOption | { options: ConstraintWsOption[] };
+
 type DraftWsMessage =
   | {
       type: "lobby_ready";
@@ -39,15 +51,7 @@ type DraftWsMessage =
         constraint_team?: string | null;
         constraint_year?: string | null;
       }>;
-      constraint?: {
-        teams: ConstraintTeamSegmentWs[];
-        yearLabel?: string | null;
-        yearStart?: number | null;
-        yearEnd?: number | null;
-        nameLetter?: string | null;
-        namePart?: "first" | "last" | "either" | null;
-        player?: { id: number; name: string; image_url?: string | null } | null;
-      } | null;
+      constraint?: ConstraintWs | null;
       pending_selection?: {
         host?: { id: number; name: string; image_url?: string | null } | null;
         guest?: { id: number; name: string; image_url?: string | null } | null;
@@ -81,29 +85,13 @@ type DraftWsMessage =
       draft_id: number;
       by_role: "host" | "guest";
       stage: "year" | "team" | "letter" | "player";
-      constraint: {
-        teams: ConstraintTeamSegmentWs[];
-        yearLabel?: string | null;
-        yearStart?: number | null;
-        yearEnd?: number | null;
-        nameLetter?: string | null;
-        namePart?: "first" | "last" | "either" | null;
-        player?: { id: number; name: string; image_url?: string | null } | null;
-      };
+      constraint: ConstraintWs;
     }
   | {
       type: "roll_result";
       draft_id: number;
       by_role: "host" | "guest";
-      constraint: {
-        teams: ConstraintTeamSegmentWs[];
-        yearLabel?: string | null;
-        yearStart?: number | null;
-        yearEnd?: number | null;
-        nameLetter?: string | null;
-        namePart?: "first" | "last" | "either" | null;
-        player?: { id: number; name: string; image_url?: string | null } | null;
-      };
+      constraint: ConstraintWs;
     }
   | { type: "roll_error"; draft_id: number; message: string }
   | { type: "rerolls_updated"; draft_id: number; role: "host" | "guest"; remaining: number; max: number }
@@ -139,15 +127,7 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
   >(null);
   const [rollText, setRollText] = useState<string | null>(null);
   const [rollStageDecadeLabel, setRollStageDecadeLabel] = useState<string | null>(null);
-  const [rollConstraint, setRollConstraint] = useState<{
-    teams: ConstraintTeamSegmentWs[];
-    yearLabel?: string | null;
-    yearStart?: number | null;
-    yearEnd?: number | null;
-    nameLetter?: string | null;
-    namePart?: "first" | "last" | "either" | null;
-    player?: { id: number; name: string; image_url?: string | null } | null;
-  } | null>(null);
+  const [rollConstraint, setRollConstraint] = useState<ConstraintWs | null>(null);
   const [pendingSelection, setPendingSelection] = useState<{
     host: { id: number; name: string; image_url?: string | null } | null;
     guest: { id: number; name: string; image_url?: string | null } | null;
@@ -317,8 +297,9 @@ export function useDraftSocket(draftRef: string, role: "host" | "guest", enabled
           } else if (msg.type === "roll_stage_result") {
             // Persist partial constraint so previous stages "stick" in the UI.
             setRollConstraint(msg.constraint);
-            if (typeof msg.constraint.yearLabel === "string") {
-              setRollStageDecadeLabel(msg.constraint.yearLabel);
+            const first = (msg.constraint as { options?: Array<{ yearLabel?: string | null }> }).options?.[0] ?? (msg.constraint as { yearLabel?: string | null });
+            if (typeof first.yearLabel === "string") {
+              setRollStageDecadeLabel(first.yearLabel);
             }
           } else if (msg.type === "roll_result") {
             setRollStage("idle");

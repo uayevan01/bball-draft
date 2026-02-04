@@ -3,6 +3,7 @@
 import Image from "next/image";
 
 import type { EligibilityConstraint, PlayerSearchResult, SpinPreviewTeam } from "./types";
+import { HoverTooltip } from "./HoverTooltip";
 
 export function MainInfoCard({
   isLocal,
@@ -16,12 +17,13 @@ export function MainInfoCard({
   showConstraint,
   isSpinning,
   rollStage,
-  spinPreviewDecade,
-  spinPreviewTeam,
-  spinPreviewLetter,
-  spinPreviewPlayer,
+  spinPreviewDecades,
+  spinPreviewTeams,
+  spinPreviewLetters,
+  spinPreviewPlayers,
   rollStageDecadeLabel,
-  constraint,
+  constraints,
+  rollCount,
 }: {
   currentTurnName: string;
   isLocal: boolean;
@@ -35,16 +37,17 @@ export function MainInfoCard({
   showConstraint: boolean;
   isSpinning: boolean;
   rollStage: null | "idle" | "spinning_decade" | "spinning_team" | "spinning_letter" | "spinning_player";
-  spinPreviewDecade: string | null;
-  spinPreviewTeam: SpinPreviewTeam | null;
-  spinPreviewLetter: string | null;
-  spinPreviewPlayer: PlayerSearchResult | null;
+  spinPreviewDecades: Array<string | null>;
+  spinPreviewTeams: Array<SpinPreviewTeam | null>;
+  spinPreviewLetters: Array<string | null>;
+  spinPreviewPlayers: Array<PlayerSearchResult | null>;
   rollStageDecadeLabel: string | null;
-  constraint: EligibilityConstraint | null;
+  constraints: EligibilityConstraint[] | null;
+  rollCount: number;
 }) {
+  const constraint = constraints?.[0] ?? null;
   const segments = constraint?.teams ?? [];
   const segmentCount = segments.length;
-  const showNames = segmentCount <= 4;
   const sizePx = segmentCount <= 2 ? 96 : segmentCount <= 4 ? 72 : segmentCount <= 8 ? 56 : 44;
 
   function resolveFranchiseRootId(teamId: number, byId: Map<number, { previous_team_id?: number | null }>): number {
@@ -61,30 +64,7 @@ export function MainInfoCard({
     return cur;
   }
 
-  const groupedSegments = (() => {
-    if (!constraint) return [];
-    const byId = new Map<number, { previous_team_id?: number | null }>();
-    for (const s of segments) byId.set(s.team.id, { previous_team_id: s.team.previous_team_id ?? null });
-    const groups = new Map<number, typeof segments>();
-    for (const s of segments) {
-      const root = resolveFranchiseRootId(s.team.id, byId);
-      const arr = groups.get(root) ?? [];
-      arr.push(s);
-      groups.set(root, arr);
-    }
-    // Sort groups and segments for stable UI
-    const groupArr = Array.from(groups.entries())
-      .sort(([a], [b]) => a - b)
-      .map(([, segs]) =>
-        segs.sort((x, y) => {
-          const ax = x.team.founded_year ?? 9999;
-          const ay = y.team.founded_year ?? 9999;
-          if (ax !== ay) return ax - ay;
-          return x.team.name.localeCompare(y.team.name);
-        }),
-      );
-    return groupArr;
-  })();
+  // (grouping for team segments is now computed per option when rendering multi-roll constraints)
 
   return (
     <div className="relative rounded-xl border border-black/10 bg-white p-4 pb-4 dark:border-white/10 dark:bg-zinc-900/50">
@@ -127,53 +107,67 @@ export function MainInfoCard({
 
                 {/* Main content */}
                 {isSpinning ? (
-                  <div className="min-h-full grid content-center justify-items-center gap-2">
-                    {rollStage === "spinning_team" && spinPreviewTeam?.logo_url ? (
-                      <Image
-                        src={spinPreviewTeam.logo_url}
-                        alt={spinPreviewTeam.name}
-                        width={96}
-                        height={96}
-                        className="h-24 w-24 object-contain"
-                      />
-                    ) : rollStage === "spinning_letter" && constraint?.teams?.length ? (
-                      (() => {
-                        const seg = constraint.teams[constraint.teams.length - 1];
-                        const logo = seg?.team?.logo_url ?? null;
-                        const name = seg?.team?.name ?? "Team";
-                        return logo ? (
-                          <Image src={logo} alt={name} width={96} height={96} className="h-24 w-24 object-contain" />
-                        ) : (
-                          <div className="h-24 w-24" />
-                        );
-                      })()
-                    ) : rollStage === "spinning_player" ? (
-                      <div className="flex items-center justify-center gap-3">
-                        {constraint?.teams?.length ? (
-                          (() => {
-                            const seg = constraint.teams[constraint.teams.length - 1];
-                            const logo = seg?.team?.logo_url ?? null;
-                            const name = seg?.team?.name ?? "Team";
-                            return logo ? (
-                              <Image src={logo} alt={name} width={96} height={96} className="h-24 w-24 object-contain" />
-                            ) : (
-                              <div className="h-24 w-24" />
-                            );
-                          })()
-                        ) : (
-                          <div className="h-24 w-24" />
-                        )}
-                        <Image
-                          src={spinPreviewPlayer?.image_url ?? "/avatar-placeholder.svg"}
-                          alt={spinPreviewPlayer?.name ?? "Player"}
-                          width={96}
-                          height={96}
-                          className="h-24 w-24 rounded-2xl object-contain"
-                        />
-                      </div>
-                    ) : (
-                      <div className="h-24 w-24" />
-                    )}
+                  <div className="min-h-full grid content-center justify-items-center gap-3">
+                    <div className="flex flex-wrap items-center justify-center gap-4">
+                      {Array.from({ length: Math.max(1, rollCount || 1) }).map(
+                        (_, i) => {
+                          const team = spinPreviewTeams[i] ?? null;
+                          const decade = spinPreviewDecades[i] ?? null;
+                          const letter = spinPreviewLetters[i] ?? null;
+                          const player = spinPreviewPlayers[i] ?? null;
+                          const opt = constraints?.[i] ?? null;
+                          const lastTeamLogo =
+                            opt?.teams?.length ? opt.teams[opt.teams.length - 1]?.team?.logo_url ?? null : null;
+                          const lastTeamName = opt?.teams?.length ? opt.teams[opt.teams.length - 1]?.team?.name ?? "Team" : "Team";
+                          return (
+                            <div key={i} className="grid justify-items-center gap-2">
+                              {rollStage === "spinning_team" ? (
+                                team?.logo_url ? (
+                                  <Image src={team.logo_url} alt={team.name} width={72} height={72} className="h-[72px] w-[72px] object-contain" />
+                                ) : (
+                                  <div className="h-[72px] w-[72px]" />
+                                )
+                              ) : rollStage === "spinning_letter" ? (
+                                lastTeamLogo ? (
+                                  <Image src={lastTeamLogo} alt={lastTeamName} width={72} height={72} className="h-[72px] w-[72px] object-contain" />
+                                ) : (
+                                  <div className="h-[72px] w-[72px]" />
+                                )
+                              ) : rollStage === "spinning_player" ? (
+                                <div className="flex items-center gap-2">
+                                  {lastTeamLogo ? (
+                                    <Image src={lastTeamLogo} alt={lastTeamName} width={72} height={72} className="h-[72px] w-[72px] object-contain" />
+                                  ) : (
+                                    <div className="h-[72px] w-[72px]" />
+                                  )}
+                                  <Image
+                                    src={player?.image_url ?? "/avatar-placeholder.svg"}
+                                    alt={player?.name ?? "Player"}
+                                    width={72}
+                                    height={72}
+                                    className="h-[72px] w-[72px] rounded-2xl object-contain"
+                                  />
+                                </div>
+                              ) : (
+                                <div className="h-[72px] w-[72px]" />
+                              )}
+
+                              <div className="text-sm font-semibold text-zinc-950 dark:text-white">
+                                {rollStage === "spinning_decade"
+                                  ? decade ?? "Any"
+                                  : rollStage === "spinning_team"
+                                    ? team?.name ?? "Any"
+                                    : rollStage === "spinning_letter"
+                                      ? letter ?? "Any"
+                                      : rollStage === "spinning_player"
+                                        ? player?.name ?? "Any"
+                                        : "Any"}
+                              </div>
+                            </div>
+                          );
+                        },
+                      )}
+                    </div>
                     <div className="text-xs font-semibold tracking-wide text-zinc-600 dark:text-zinc-300">
                       {rollStage === "spinning_decade"
                         ? "SPINNING YEAR"
@@ -182,15 +176,6 @@ export function MainInfoCard({
                           : rollStage === "spinning_letter"
                             ? "SPINNING LETTER"
                             : "SPINNING PLAYER"}
-                    </div>
-                    <div className="text-lg font-semibold text-zinc-950 dark:text-white">
-                      {rollStage === "spinning_decade"
-                        ? spinPreviewDecade ?? "Any"
-                        : rollStage === "spinning_team"
-                          ? spinPreviewTeam?.name ?? "Any"
-                          : rollStage === "spinning_letter"
-                            ? spinPreviewLetter ?? "Any"
-                            : spinPreviewPlayer?.name ?? "Any"}
                     </div>
                     <div className="text-sm text-zinc-700 dark:text-zinc-200">
                       {rollStage === "spinning_team" ? (
@@ -215,77 +200,85 @@ export function MainInfoCard({
                       )}
                     </div>
                   </div>
-                ) : constraint ? (
-                  <div className="min-h-full grid content-center justify-items-center gap-2">
-                    <div className="flex flex-wrap items-center justify-center gap-3">
-                      {groupedSegments.map((segs, i) => (
-                        <div key={i} className="flex items-center gap-2">
-                          {segs.map((seg) => (
-                            <div
-                              key={seg.team.id}
-                              className="group relative grid justify-items-center gap-1"
-                              title={seg.team.name}
-                            >
-                              {/* Instant tooltip (avoid browser title delay) */}
-                              <div className="pointer-events-none absolute -top-2 left-1/2 z-20 hidden -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-md bg-zinc-950 px-2 py-1 text-[11px] font-semibold text-white shadow-md group-hover:block dark:bg-white dark:text-black">
-                                {seg.team.name}
+                ) : constraints?.length ? (
+                  <div className="min-h-full grid content-center justify-items-center gap-3">
+                    <div className="flex flex-wrap items-stretch justify-center gap-3">
+                      {constraints.map((c, idx) => {
+                        const segs = c.teams ?? [];
+                        const byId = new Map<number, { previous_team_id?: number | null }>();
+                        for (const s of segs) byId.set(s.team.id, { previous_team_id: s.team.previous_team_id ?? null });
+                        const groups = new Map<number, typeof segs>();
+                        for (const s of segs) {
+                          const root = resolveFranchiseRootId(s.team.id, byId);
+                          const arr = groups.get(root) ?? [];
+                          arr.push(s);
+                          groups.set(root, arr);
+                        }
+                        const grouped = Array.from(groups.entries())
+                          .sort(([a], [b]) => a - b)
+                          .map(([, xs]) =>
+                            xs.sort((x, y) => {
+                              const ax = x.team.founded_year ?? 9999;
+                              const ay = y.team.founded_year ?? 9999;
+                              if (ax !== ay) return ax - ay;
+                              return x.team.name.localeCompare(y.team.name);
+                            }),
+                          );
+
+                        return (
+                          <div
+                            key={idx}
+                            className="min-w-[220px] rounded-2xl border border-black/10 bg-white/40 p-3 dark:border-white/10 dark:bg-zinc-900/30"
+                          >
+                            <div className="flex flex-wrap items-center justify-center gap-3">
+                              {grouped.map((fr, i) => (
+                                <div key={i} className="flex items-center gap-2">
+                                  {fr.map((seg) => (
+                                    <HoverTooltip key={seg.team.id} label={seg.team.name} className="grid justify-items-center gap-1">
+                                      {seg.team.logo_url ? (
+                                        <Image
+                                          src={seg.team.logo_url}
+                                          alt={seg.team.name}
+                                          width={sizePx}
+                                          height={sizePx}
+                                          className="rounded-2xl object-contain"
+                                          style={{ width: sizePx, height: sizePx }}
+                                        />
+                                      ) : (
+                                        <div
+                                          className="rounded-2xl border border-black/10 bg-white/60 dark:border-white/10 dark:bg-zinc-900/60"
+                                          style={{ width: sizePx, height: sizePx }}
+                                        />
+                                      )}
+                                    </HoverTooltip>
+                                  ))}
+                                </div>
+                              ))}
+                              {c.player ? (
+                                <HoverTooltip label={c.player.name} className="grid justify-items-center gap-1">
+                                  <Image
+                                    src={c.player.image_url ?? "/avatar-placeholder.svg"}
+                                    alt={c.player.name}
+                                    width={sizePx}
+                                    height={sizePx}
+                                    className="rounded-2xl object-contain"
+                                    style={{ width: sizePx, height: sizePx }}
+                                  />
+                                </HoverTooltip>
+                              ) : null}
+                            </div>
+                            <div className="mt-3 text-center text-sm font-semibold text-zinc-700 dark:text-zinc-200">
+                              {(c.yearLabel ?? "No constraint") === "No constraint" ? "Any" : (c.yearLabel ?? "Any")}
+                            </div>
+                            {c.nameLetter ? (
+                              <div className="mt-1 text-center text-xs font-semibold text-zinc-600 dark:text-zinc-300">
+                                {(c.namePart ?? "first")}={c.nameLetter.toUpperCase()}
                               </div>
-                              {seg.team.logo_url ? (
-                                <Image
-                                  src={seg.team.logo_url}
-                                  alt={seg.team.name}
-                                  width={sizePx}
-                                  height={sizePx}
-                                  className="rounded-2xl object-contain"
-                                  style={{ width: sizePx, height: sizePx }}
-                                />
-                              ) : (
-                                <div
-                                  className="rounded-2xl border border-black/10 bg-white/60 dark:border-white/10 dark:bg-zinc-900/60"
-                                  style={{ width: sizePx, height: sizePx }}
-                                />
-                              )}
-                              {showNames ? (
-                                <div className="max-w-40 truncate text-xs font-semibold text-zinc-800 dark:text-zinc-200">
-                                  {seg.team.name}
-                                </div>
-                              ) : null}
-                              {seg.startYear != null && seg.endYear != null ? (
-                                <div className="text-[11px] font-medium text-zinc-600 dark:text-zinc-300">
-                                  {String(seg.startYear).slice(-2)}-{String(seg.endYear).slice(-2)}
-                                </div>
-                              ) : null}
-                            </div>
-                          ))}
-                        </div>
-                      ))}
-                      {constraint.player ? (
-                        <div className="grid justify-items-center gap-1">
-                          <Image
-                            src={constraint.player.image_url ?? "/avatar-placeholder.svg"}
-                            alt={constraint.player.name}
-                            width={sizePx}
-                            height={sizePx}
-                            className="rounded-2xl object-contain"
-                            style={{ width: sizePx, height: sizePx }}
-                          />
-                          {showNames ? (
-                            <div className="max-w-40 truncate text-xs font-semibold text-zinc-800 dark:text-zinc-200">
-                              {constraint.player.name}
-                            </div>
-                          ) : null}
-                        </div>
-                      ) : null}
+                            ) : null}
+                          </div>
+                        );
+                      })}
                     </div>
-                    <div className="text-base font-semibold text-zinc-700 dark:text-zinc-200">
-                      {(constraint.yearLabel ?? "No constraint") === "No constraint" ? "Any" : (constraint.yearLabel ?? "Any")}
-                    </div>
-                    {constraint.nameLetter ? (
-                      <div className="text-sm font-semibold text-zinc-700 dark:text-zinc-200">
-                        {(constraint.namePart ?? "first")} name starts with{" "}
-                        <span className="font-bold text-zinc-950 dark:text-white">{constraint.nameLetter.toUpperCase()}</span>
-                      </div>
-                    ) : null}
                   </div>
                 ) : showBigRoll ? (
                   <div className="flex min-h-full items-center justify-center">

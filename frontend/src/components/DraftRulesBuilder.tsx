@@ -108,6 +108,20 @@ export function DraftRulesBuilder({
               disabled={!rules.allow_reroll}
             />
           </div>
+          <div className="grid gap-1 sm:max-w-xs">
+            <div className="text-xs text-zinc-600 dark:text-zinc-300">Roll options (n)</div>
+            <input
+              className="h-10 rounded-xl border border-black/10 bg-white px-3 text-sm dark:border-white/10 dark:bg-black"
+              type="number"
+              min={1}
+              max={5}
+              value={rules.roll_count ?? 1}
+              onChange={(e) => onChange({ ...rules, roll_count: Math.max(1, Math.min(5, Number(e.target.value) || 1)) })}
+            />
+            <div className="text-xs text-zinc-500 dark:text-zinc-400">
+              Generates multiple roll results side by side each turn.
+            </div>
+          </div>
           </>
           ) : null}
         </div>

@@ -18,6 +18,7 @@ export type NameLetterPart = "first" | "last" | "either";
 
 export type DraftRules = {
   spin_fields: ("year" | "team" | "name_letter" | "player")[];
+  roll_count: number; // number of parallel roll options per turn (1..5)
   year_constraint: YearConstraint;
   team_constraint: TeamConstraint;
   name_letter_constraint: NameLetterConstraint;
@@ -41,6 +42,7 @@ export const DIVISIONS = ["Atlantic", "Central", "Southeast", "Northwest", "Paci
 export function defaultDraftRules(): DraftRules {
   return {
     spin_fields: ["year", "team"],
+    roll_count: 1,
     year_constraint: { type: "any", options: null },
     team_constraint: { type: "any", options: null },
     name_letter_constraint: { type: "any", options: null },

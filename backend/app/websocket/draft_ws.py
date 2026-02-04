@@ -91,6 +91,17 @@ def _stage_order_from_rules(rules: dict) -> list[str]:
     return out
 
 
+def _roll_count_from_rules(rules: dict) -> int:
+    """
+    Number of parallel roll options to generate per turn.
+    """
+    try:
+        n = int(rules.get("roll_count", 1))
+    except Exception:  # noqa: BLE001
+        n = 1
+    return max(1, min(5, n))
+
+
 async def _roll_year(rules: dict) -> tuple[str, int | None, int | None]:
     year_constraint = rules.get("year_constraint") if isinstance(rules.get("year_constraint"), dict) else {}
     decade_options: list[str] = []
@@ -508,8 +519,9 @@ async def _count_viable_players_for_letter(
 
 async def _roll_player(
     *,
-    draft_id: int,
+    draft_id: int,  # noqa: ARG001
     drafted_player_ids: set[int],
+    exclude_ids: set[int] | None = None,
     rules: dict,
     year_start: int | None,
     year_end: int | None,
@@ -568,6 +580,8 @@ async def _roll_player(
         ids_stmt = _apply_active_retired_filters(ids_stmt, rules=rules)
         if drafted_player_ids:
             ids_stmt = ids_stmt.where(Player.id.not_in(drafted_player_ids))
+        if exclude_ids:
+            ids_stmt = ids_stmt.where(Player.id.not_in(exclude_ids))
 
         if team_ids or (year_start is not None and year_end is not None):
             stint_exists = exists().where(PlayerTeamStint.player_id == Player.id)
@@ -762,14 +776,15 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
             persisted_role = getattr(draft, "current_constraint_role", None)
             if isinstance(persisted, dict):
                 session.current_constraint = persisted
-                # If this was a player-roll constraint, also restore pending selection for the owning role.
+                # Back-compat: legacy single-player roll used to auto-fill pending selection.
                 player_payload = persisted.get("player")
-                if (
-                    isinstance(player_payload, dict)
-                    and isinstance(player_payload.get("id"), int)
-                    and persisted_role in ("host", "guest")
-                ):
-                    session.pending_selection[persisted_role] = player_payload
+                if not isinstance(persisted.get("options"), list):
+                    if (
+                        isinstance(player_payload, dict)
+                        and isinstance(player_payload.get("id"), int)
+                        and persisted_role in ("host", "guest")
+                    ):
+                        session.pending_selection[persisted_role] = player_payload
 
     await draft_manager.broadcast(
         session,
@@ -911,36 +926,47 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
             return
 
         drafted_ids = await _drafted_player_ids(draft_id=draft_id)
+        roll_count = _roll_count_from_rules(rules)
 
-        # Sequential stages: each stage rolls ONE thing and persists it.
-        year_label: str = "No constraint"
-        year_start: int | None = None
-        year_end: int | None = None
-        team_segments: list[dict] = []
-        name_letter: str | None = None
+        # Sequential stages: each stage rolls ONE field, but we generate roll_count parallel options.
+        year_labels: list[str] = ["No constraint"] * roll_count
+        year_starts: list[int | None] = [None] * roll_count
+        year_ends: list[int | None] = [None] * roll_count
+        team_segments_by_opt: list[list[dict]] = [[] for _ in range(roll_count)]
+        name_letters: list[str | None] = [None] * roll_count
         name_part: str = rules.get("name_letter_part") if isinstance(rules.get("name_letter_part"), str) else "first"
         if name_part not in ("first", "last", "either"):
             name_part = "first"
-        rolled_player: dict | None = None
+        rolled_players: list[dict | None] = [None] * roll_count
 
-        # Seed static constraints for fields that are NOT spun.
+        # Seed static constraints for fields that are NOT spun (applied to all options).
         if "year" not in stages:
-            year_label, year_start, year_end = _parse_static_year_constraint(rules)
+            ylab, ys, ye = _parse_static_year_constraint(rules)
+            year_labels = [ylab] * roll_count
+            year_starts = [ys] * roll_count
+            year_ends = [ye] * roll_count
         if "letter" not in stages:
-            name_letter, name_part = _parse_static_name_letter_constraint(rules)
-        # If team isn't spun, still apply any fixed team restriction (optionally filtered by the current year window).
+            L, name_part = _parse_static_name_letter_constraint(rules)
+            name_letters = [L] * roll_count
         if "team" not in stages:
-            team_segments = await _resolve_static_team_segments(rules=rules, year_start=year_start, year_end=year_end)
+            # If year isn't spun, static teams can be filtered by the (static) year window. Otherwise it's unbounded.
+            segs = await _resolve_static_team_segments(rules=rules, year_start=year_starts[0], year_end=year_ends[0])
+            team_segments_by_opt = [list(segs) for _ in range(roll_count)]
 
         def current_constraint() -> dict:
             return {
-                "yearLabel": year_label,
-                "yearStart": year_start,
-                "yearEnd": year_end,
-                "teams": team_segments,
-                "nameLetter": name_letter,
-                "namePart": name_part,
-                "player": rolled_player,
+                "options": [
+                    {
+                        "yearLabel": year_labels[i],
+                        "yearStart": year_starts[i],
+                        "yearEnd": year_ends[i],
+                        "teams": team_segments_by_opt[i],
+                        "nameLetter": name_letters[i],
+                        "namePart": name_part,
+                        "player": rolled_players[i],
+                    }
+                    for i in range(roll_count)
+                ]
             }
 
         for st in stages:
@@ -948,22 +974,24 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
             await asyncio.sleep(0.8)
             try:
                 if st == "year":
-                    year_label, year_start, year_end = await _roll_year(rules)
-                    # If team is not spun, refresh static teams to respect the rolled year window.
-                    if "team" not in stages:
-                        team_segments = await _resolve_static_team_segments(rules=rules, year_start=year_start, year_end=year_end)
+                    for i in range(roll_count):
+                        ylab, ys, ye = await _roll_year(rules)
+                        year_labels[i] = ylab
+                        year_starts[i] = ys
+                        year_ends[i] = ye
+                        if "team" not in stages:
+                            # Refresh static teams to respect each rolled year window.
+                            segs = await _resolve_static_team_segments(rules=rules, year_start=ys, year_end=ye)
+                            team_segments_by_opt[i] = segs
                 elif st == "team":
-                    team_segments = await _roll_team(year_start=year_start, year_end=year_end, rules=rules)
+                    for i in range(roll_count):
+                        team_segments_by_opt[i] = await _roll_team(
+                            year_start=year_starts[i],
+                            year_end=year_ends[i],
+                            rules=rules,
+                        )
                 elif st == "letter":
-                    # Filter the letter pool to only those with enough viable players.
-                    team_ids: list[int] = []
-                    for s in team_segments:
-                        if isinstance(s, dict) and isinstance(s.get("team"), dict):
-                            tid = s["team"].get("id")
-                            if isinstance(tid, int):
-                                team_ids.append(tid)
-                    team_ids = sorted(set(team_ids))
-
+                    # Shared letter pool config
                     pool: list[str] = []
                     name_constraint = rules.get("name_letter_constraint") if isinstance(rules.get("name_letter_constraint"), dict) else {}
                     if name_constraint.get("type") == "specific" and isinstance(name_constraint.get("options"), list):
@@ -982,39 +1010,55 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
                     first_letter_expr = func.upper(func.substr(Player.name, 1, 1))
                     last_letter_expr = func.upper(func.substr(func.split_part(Player.name, " ", 2), 1, 1))
 
-                    viable: list[str] = []
-                    for L in pool:
-                        if name_part == "last":
-                            name_clause = last_letter_expr == L
-                        elif name_part == "either":
-                            name_clause = or_(first_letter_expr == L, last_letter_expr == L)
-                        else:
-                            name_clause = first_letter_expr == L
-                        cnt = await _count_viable_players_for_letter(
-                            drafted_player_ids=drafted_ids,
-                            rules=rules,
-                            year_start=year_start,
-                            year_end=year_end,
-                            team_ids=team_ids,
-                            name_clause=name_clause,
-                            min_needed=min_players,
-                        )
-                        if cnt >= min_players:
-                            viable.append(L)
-                    if not viable:
-                        viable = pool
-                    name_letter = random.choice(viable)
+                    for i in range(roll_count):
+                        team_ids: list[int] = []
+                        for s in team_segments_by_opt[i]:
+                            if isinstance(s, dict) and isinstance(s.get("team"), dict):
+                                tid = s["team"].get("id")
+                                if isinstance(tid, int):
+                                    team_ids.append(tid)
+                        team_ids = sorted(set(team_ids))
+
+                        viable: list[str] = []
+                        for L in pool:
+                            if name_part == "last":
+                                name_clause = last_letter_expr == L
+                            elif name_part == "either":
+                                name_clause = or_(first_letter_expr == L, last_letter_expr == L)
+                            else:
+                                name_clause = first_letter_expr == L
+                            cnt = await _count_viable_players_for_letter(
+                                drafted_player_ids=drafted_ids,
+                                rules=rules,
+                                year_start=year_starts[i],
+                                year_end=year_ends[i],
+                                team_ids=team_ids,
+                                name_clause=name_clause,
+                                min_needed=min_players,
+                            )
+                            if cnt >= min_players:
+                                viable.append(L)
+                        if not viable:
+                            viable = pool
+                        name_letters[i] = random.choice(viable)
                 else:
-                    rolled_player = await _roll_player(
-                        draft_id=draft_id,
-                        drafted_player_ids=drafted_ids,
-                        rules=rules,
-                        year_start=year_start,
-                        year_end=year_end,
-                        team_segments=team_segments,
-                        name_letter=name_letter,
-                        name_part=name_part,
-                    )
+                    exclude: set[int] = set()
+                    for i in range(roll_count):
+                        p = await _roll_player(
+                            draft_id=draft_id,
+                            drafted_player_ids=drafted_ids,
+                            exclude_ids=exclude,
+                            rules=rules,
+                            year_start=year_starts[i],
+                            year_end=year_ends[i],
+                            team_segments=team_segments_by_opt[i],
+                            name_letter=name_letters[i],
+                            name_part=name_part,
+                        )
+                        rolled_players[i] = p
+                        pid = p.get("id") if isinstance(p, dict) else None
+                        if isinstance(pid, int):
+                            exclude.add(pid)
             except RuntimeError as e:
                 await draft_manager.broadcast(session, {"type": "roll_error", "draft_id": draft_id, "message": str(e)})
                 break
@@ -1037,15 +1081,7 @@ async def draft_ws(ws: WebSocket, draft_ref: str, role: Role = "guest"):
             # Persist the final constraint so refresh/reconnect doesn't lose it.
             await _persist_current_constraint(draft_id=draft_id, by_role=by_role, constraint=final_constraint)
             await draft_manager.broadcast(session, {"type": "roll_result", "draft_id": draft_id, "by_role": by_role, "constraint": final_constraint})
-            # If we rolled a player, treat it as the active "pending selection" for that role.
-            player_payload = final_constraint.get("player") if isinstance(final_constraint, dict) else None
-            if isinstance(player_payload, dict) and isinstance(player_payload.get("id"), int):
-                async with session.lock:
-                    session.pending_selection[by_role] = player_payload
-                await draft_manager.broadcast(
-                    session,
-                    {"type": "pending_selection_updated", "draft_id": draft_id, "role": by_role, "player": player_payload},
-                )
+            # Multi-roll UI allows the client to choose; do not auto-set pending selection here.
 
     try:
         while True:

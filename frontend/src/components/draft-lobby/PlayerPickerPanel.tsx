@@ -17,7 +17,7 @@ export function PlayerPickerPanel({
   onlyEligible,
   showOnlyEligibleToggle,
   onOnlyEligibleChange,
-  constraint,
+  constraints,
   pendingSelection,
   myRole,
   onPreviewPlayer,
@@ -35,7 +35,7 @@ export function PlayerPickerPanel({
   onlyEligible: boolean;
   showOnlyEligibleToggle: boolean;
   onOnlyEligibleChange: (v: boolean) => void;
-  constraint: EligibilityConstraint | null;
+  constraints: EligibilityConstraint[] | null;
   pendingSelection: {
     host: { id: number; name: string; image_url?: string | null } | null;
     guest: { id: number; name: string; image_url?: string | null } | null;
@@ -49,6 +49,7 @@ export function PlayerPickerPanel({
   playerSpinEnabled: boolean;
 }) {
   const { getToken } = useAuth();
+  const constraint = constraints?.[0] ?? null;
   const [q, setQ] = useState("");
   const [results, setResults] = useState<PlayerSearchResult[]>([]);
   const [searchErrorLocal, setSearchErrorLocal] = useState<string | null>(null);
@@ -70,7 +71,9 @@ export function PlayerPickerPanel({
         const params = new URLSearchParams();
         params.set("q", term);
         params.set("limit", "10");
-        if (constraint && onlyEligible) {
+        // Server-side filtering only supports a single constraint. With multiple options,
+        // we fall back to client-side eligibility gating on confirm.
+        if (constraints?.length === 1 && constraint && onlyEligible) {
           const ids = (constraint.teams ?? []).map((t) => t.team.id).filter((x) => Number.isFinite(x));
           if (ids.length === 1) params.set("stint_team_id", String(ids[0]));
           if (ids.length > 1) params.set("stint_team_ids", ids.join(","));
@@ -99,16 +102,31 @@ export function PlayerPickerPanel({
       cancelled = true;
       window.clearTimeout(t);
     };
-  }, [q, canSearch, constraint, onlyEligible, getToken]);
+  }, [q, canSearch, constraints, constraint, onlyEligible, getToken]);
 
   const placeholder = canSearch ? "Search player name…" : constraint ? "Search player name…" : "Waiting for constraint…";
   const errorToShow = searchErrorLocal || searchError;
 
   const otherRole = myRole === "host" ? "guest" : "host";
   const otherPending = pendingSelection?.[otherRole] ?? null;
-  const myPending = pendingSelection?.[myRole] ?? null;
+  const rolledPlayers = useMemo(() => {
+    if (!playerSpinEnabled) return [] as Array<{ id: number; name: string; image_url?: string | null }>;
+    const out: Array<{ id: number; name: string; image_url?: string | null }> = [];
+    for (const c of constraints ?? []) {
+      const p = c?.player;
+      if (p && typeof p.id === "number") out.push(p);
+    }
+    const seen = new Set<number>();
+    return out.filter((p) => (seen.has(p.id) ? false : (seen.add(p.id), true)));
+  }, [constraints, playerSpinEnabled]);
 
-  const canTakeRolled = Boolean(started && canPick && !isSpinning && myPending && !drafted(myPending.id));
+  const [selectedRolledId, setSelectedRolledId] = useState<number | null>(null);
+  const selectedRolled = useMemo(() => {
+    if (selectedRolledId == null) return null;
+    return rolledPlayers.find((p) => p.id === selectedRolledId) ?? null;
+  }, [rolledPlayers, selectedRolledId]);
+
+  const canTakeRolled = Boolean(started && canPick && !isSpinning && selectedRolled && !drafted(selectedRolled.id));
 
   function matchesNameLetter(name: string, letter: string, part: "first" | "last" | "either") {
     const L = letter.trim().toUpperCase();
@@ -132,56 +150,51 @@ export function PlayerPickerPanel({
         setSelectedEligibility(false);
         return;
       }
-      if (!constraint) {
+      if (!constraints?.length) {
         setSelectedEligibility(true);
         return;
       }
 
-      const allowActive = constraint.allowActive !== false;
-      const allowRetired = constraint.allowRetired !== false;
-      const needsRetiredCheck = !(allowActive && allowRetired);
-      const needsStintCheck =
-        !onlyEligible && Boolean(constraint) && (constraint.teams?.length || (constraint.yearStart != null && constraint.yearEnd != null));
-      const needsStintCountCheck =
-        !onlyEligible && Boolean(constraint) && (constraint.minTeamStints != null || constraint.maxTeamStints != null);
+      function eligibleForConstraint(detail: PlayerDetail, c: EligibilityConstraint): boolean {
+        if (drafted(detail.id)) return false;
+        const allowActive = c.allowActive !== false;
+        const allowRetired = c.allowRetired !== false;
+        if (!allowActive && !allowRetired) return false;
+        const isRetired = detail.retirement_year != null;
+        if (!allowRetired && isRetired) return false;
+        if (!allowActive && !isRetired) return false;
 
-      // If we don't need any detail-based checks, we're done.
-      if (!needsRetiredCheck && !needsStintCheck && !needsStintCountCheck) {
-        setSelectedEligibility(true);
-        return;
+        if (c.nameLetter) {
+          const part = (c.namePart ?? "first") as "first" | "last" | "either";
+          if (!matchesNameLetter(detail.name, c.nameLetter, part)) return false;
+        }
+
+        const needsStintCheck = Boolean((c.teams?.length ?? 0) || (c.yearStart != null && c.yearEnd != null));
+        if (needsStintCheck) {
+          const teamIds = new Set((c.teams ?? []).map((t) => t.team.id));
+          const ok = (detail.team_stints ?? []).some(
+            (s) =>
+              (teamIds.size === 0 || teamIds.has(s.team_id)) &&
+              (c.yearStart == null ||
+                c.yearEnd == null ||
+                (s.start_year <= c.yearEnd && (s.end_year ?? detail.retirement_year ?? 9999) >= c.yearStart)),
+          );
+          if (!ok) return false;
+        }
+
+        const ccount = detail.coalesced_team_stint_count;
+        if ((c.minTeamStints != null || c.maxTeamStints != null) && typeof ccount !== "number") return false;
+        if (c.minTeamStints != null && typeof ccount === "number" && ccount < c.minTeamStints) return false;
+        if (c.maxTeamStints != null && typeof ccount === "number" && ccount > c.maxTeamStints) return false;
+        return true;
       }
+
+      const eligibleForAny = (detail: PlayerDetail) => (constraints ?? []).some((c) => eligibleForConstraint(detail, c));
 
       const cached = detailsCacheRef.current[selected.id];
       if (cached) {
         setSelectedRetired(cached.retirement_year != null);
-        if (!onlyEligible) {
-          let ok = true;
-          if (needsStintCheck) {
-            const teamIds = new Set((constraint.teams ?? []).map((t) => t.team.id));
-            ok =
-              ok &&
-              (cached.team_stints ?? []).some(
-                (s) =>
-                  (teamIds.size === 0 || teamIds.has(s.team_id)) &&
-                  (constraint.yearStart == null ||
-                    constraint.yearEnd == null ||
-                    (s.start_year <= constraint.yearEnd &&
-                      (s.end_year ?? cached.retirement_year ?? 9999) >= constraint.yearStart)),
-              );
-          }
-          if (needsStintCountCheck) {
-            const c = cached.coalesced_team_stint_count;
-            if (typeof c !== "number") {
-              ok = false;
-            } else {
-              if (ok && constraint.minTeamStints != null) ok = c >= constraint.minTeamStints;
-              if (ok && constraint.maxTeamStints != null) ok = c <= constraint.maxTeamStints;
-            }
-          }
-          setSelectedEligibility(ok);
-        } else {
-          setSelectedEligibility(true);
-        }
+        setSelectedEligibility(eligibleForAny(cached));
         return;
       }
 
@@ -191,34 +204,7 @@ export function PlayerPickerPanel({
         detailsCacheRef.current[selected.id] = detail;
         if (cancelled) return;
         setSelectedRetired(detail.retirement_year != null);
-        if (!onlyEligible) {
-          let ok = true;
-          if (needsStintCheck) {
-            const teamIds = new Set((constraint.teams ?? []).map((t) => t.team.id));
-            ok =
-              ok &&
-              (detail.team_stints ?? []).some(
-                (s) =>
-                  (teamIds.size === 0 || teamIds.has(s.team_id)) &&
-                  (constraint.yearStart == null ||
-                    constraint.yearEnd == null ||
-                    (s.start_year <= constraint.yearEnd &&
-                      (s.end_year ?? detail.retirement_year ?? 9999) >= constraint.yearStart)),
-              );
-          }
-          if (needsStintCountCheck) {
-            const c = detail.coalesced_team_stint_count;
-            if (typeof c !== "number") {
-              ok = false;
-            } else {
-              if (ok && constraint.minTeamStints != null) ok = c >= constraint.minTeamStints;
-              if (ok && constraint.maxTeamStints != null) ok = c <= constraint.maxTeamStints;
-            }
-          }
-          setSelectedEligibility(ok);
-        } else {
-          setSelectedEligibility(true);
-        }
+        setSelectedEligibility(eligibleForAny(detail));
       } catch {
         if (!cancelled) {
           setSelectedRetired(null);
@@ -230,7 +216,7 @@ export function PlayerPickerPanel({
     return () => {
       cancelled = true;
     };
-  }, [selected, drafted, constraint, onlyEligible, getToken]);
+  }, [selected, drafted, constraints, getToken]);
 
   const canConfirmPick = useMemo(() => {
     if (!started) return false;
@@ -238,28 +224,11 @@ export function PlayerPickerPanel({
     if (!canPick) return false;
     if (isSpinning) return false;
     if (drafted(selected.id)) return false;
-    // Constraint can be null when the draft type has no eligibility restrictions (no roll + any team/year/letter).
-    // In that case, allow the pick.
-    if (constraint) {
-      const allowActive = constraint.allowActive !== false;
-      const allowRetired = constraint.allowRetired !== false;
-      if (!allowActive && !allowRetired) return false;
-      if (!allowActive || !allowRetired) {
-        // If pool is restricted and we don't know yet, block confirm until details arrive.
-        if (selectedRetired == null) return false;
-        if (!allowRetired && selectedRetired) return false;
-        if (!allowActive && !selectedRetired) return false;
-      }
-    }
-    if (constraint?.nameLetter) {
-      const part = (constraint.namePart ?? "first") as "first" | "last" | "either";
-      if (!matchesNameLetter(selected.name, constraint.nameLetter, part)) return false;
-    }
-    if (!onlyEligible && constraint) {
+    if (constraints?.length) {
       return selectedEligibility === true;
     }
     return true;
-  }, [started, selected, canPick, isSpinning, drafted, constraint, onlyEligible, selectedEligibility, selectedRetired]);
+  }, [started, selected, canPick, isSpinning, drafted, constraints, selectedEligibility]);
 
   return (
     <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-900/50">
@@ -269,7 +238,7 @@ export function PlayerPickerPanel({
         <>
           <div className="text-sm font-semibold">Your player</div>
           <div className="mt-3 grid gap-3">
-            {!myPending ? (
+            {!rolledPlayers.length ? (
               <div className="rounded-xl border border-black/10 bg-black/5 p-3 text-sm text-zinc-700 dark:border-white/10 dark:bg-white/10 dark:text-zinc-200">
                 Waiting for roll...
               </div>
@@ -278,14 +247,14 @@ export function PlayerPickerPanel({
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex min-w-0 items-center gap-3">
                     <Image
-                      src={myPending.image_url ?? "/avatar-placeholder.svg"}
-                      alt={myPending.name}
+                      src={(selectedRolled?.image_url ?? null) ?? "/avatar-placeholder.svg"}
+                      alt={selectedRolled?.name ?? "Player"}
                       width={40}
                       height={40}
                       className="h-10 w-10 flex-none rounded-lg object-contain"
                     />
                     <div className="min-w-0">
-                      <div className="truncate text-sm font-semibold">{myPending.name}</div>
+                      <div className="truncate text-sm font-semibold">{selectedRolled?.name ?? "Select a player below"}</div>
                     </div>
                   </div>
                   <div className="flex flex-wrap justify-end gap-2">
@@ -293,8 +262,8 @@ export function PlayerPickerPanel({
                       type="button"
                       disabled={!canTakeRolled}
                       onClick={() => {
-                        if (!myPending) return;
-                        onPickPlayer(myPending.id);
+                        if (!selectedRolled) return;
+                        onPickPlayer(selectedRolled.id);
                       }}
                       className="h-10 whitespace-nowrap rounded-full bg-zinc-950 px-4 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-60 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
                     >
@@ -309,11 +278,51 @@ export function PlayerPickerPanel({
                   </div>
                 ) : null}
 
-                {myPending && drafted(myPending.id) ? (
+                {selectedRolled && drafted(selectedRolled.id) ? (
                   <div className="mt-2 text-xs text-red-700 dark:text-red-300">This player was already drafted. Please reroll.</div>
                 ) : null}
               </div>
             )}
+
+            {rolledPlayers.length ? (
+              <div className="grid gap-2">
+                <div className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">Rolled players</div>
+                <div className="grid gap-2">
+                  {rolledPlayers.map((p) => {
+                    const isDrafted = drafted(p.id);
+                    const isSelected = selectedRolledId === p.id;
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        disabled={!canPick || isSpinning}
+                        onClick={() => {
+                          setSelectedRolledId(p.id);
+                          onPreviewPlayer(p.id);
+                        }}
+                        className={`flex items-center justify-between rounded-xl border px-3 py-2 text-left text-sm hover:bg-black/5 disabled:opacity-60 dark:hover:bg-white/10 ${
+                          isSelected ? "border-zinc-950 dark:border-white" : "border-black/10 dark:border-white/10"
+                        }`}
+                      >
+                        <span className="flex min-w-0 items-center gap-3">
+                          <Image
+                            src={p.image_url ?? "/avatar-placeholder.svg"}
+                            alt={p.name}
+                            width={32}
+                            height={32}
+                            className="h-8 w-8 flex-none rounded-lg object-contain"
+                          />
+                          <span className="truncate">{p.name}</span>
+                        </span>
+                        <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                          {isDrafted ? "Drafted" : isSelected ? "Selected" : "Select"}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
 
             {otherPending ? (
               <div className="rounded-xl border border-black/10 bg-black/5 p-3 dark:border-white/10 dark:bg-white/10">
