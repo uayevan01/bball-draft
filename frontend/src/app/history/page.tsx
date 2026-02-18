@@ -97,6 +97,7 @@ export default function HistoryPage() {
                         alt={opp.name}
                         width={18}
                         height={18}
+                        unoptimized
                         className="h-[18px] w-[18px] rounded-full object-cover"
                       />
                       <span className="truncate font-medium">{opp.name}</span>

@@ -44,6 +44,7 @@ export function DraftSideColumn({
             width={28}
             height={28}
             title={ringTitle}
+            unoptimized
             className={`h-7 w-7 flex-none rounded-full object-cover ${ringClass}`}
           />
           <div className="min-w-0">

@@ -249,6 +249,7 @@ export function PlayerPickerPanel({
                     alt={otherPending.name}
                     width={40}
                     height={40}
+                    unoptimized
                     className="h-10 w-10 flex-none rounded-lg object-contain"
                   />
                   <div className="min-w-0">
@@ -272,6 +273,7 @@ export function PlayerPickerPanel({
                       alt={selectedRolled?.name ?? "Player"}
                       width={40}
                       height={40}
+                      unoptimized
                       className="h-10 w-10 flex-none rounded-lg object-contain"
                     />
                     <div className="min-w-0">
@@ -331,6 +333,7 @@ export function PlayerPickerPanel({
                             alt={p.name}
                             width={32}
                             height={32}
+                            unoptimized
                             className="h-8 w-8 flex-none rounded-lg object-contain"
                           />
                           <span className="truncate">{p.name}</span>
@@ -359,6 +362,7 @@ export function PlayerPickerPanel({
                       alt={selected.name}
                       width={40}
                       height={40}
+                      unoptimized
                       className="h-10 w-10 flex-none rounded-lg object-contain"
                     />
                     <div className="min-w-0">
@@ -474,6 +478,7 @@ export function PlayerPickerPanel({
                     alt={otherPending.name}
                     width={40}
                     height={40}
+                    unoptimized
                     className="h-10 w-10 flex-none rounded-lg object-contain"
                   />
                   <div className="min-w-0">
@@ -529,6 +534,7 @@ export function PlayerPickerPanel({
                         alt={p.name}
                         width={32}
                         height={32}
+                        unoptimized
                         className="h-8 w-8 flex-none rounded-lg object-contain"
                       />
                       <span className="truncate">{p.name}</span>

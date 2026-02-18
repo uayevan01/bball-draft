@@ -123,20 +123,41 @@ export function MainInfoCard({
                             <div key={i} className="grid justify-items-center gap-2">
                               {rollStage === "spinning_team" ? (
                                 team?.logo_url ? (
-                                  <Image src={team.logo_url} alt={team.name} width={72} height={72} className="h-[72px] w-[72px] object-contain" />
+                                  <Image
+                                    src={team.logo_url}
+                                    alt={team.name}
+                                    width={72}
+                                    height={72}
+                                    unoptimized
+                                    className="h-[72px] w-[72px] object-contain"
+                                  />
                                 ) : (
                                   <div className="h-[72px] w-[72px]" />
                                 )
                               ) : rollStage === "spinning_letter" ? (
                                 lastTeamLogo ? (
-                                  <Image src={lastTeamLogo} alt={lastTeamName} width={72} height={72} className="h-[72px] w-[72px] object-contain" />
+                                  <Image
+                                    src={lastTeamLogo}
+                                    alt={lastTeamName}
+                                    width={72}
+                                    height={72}
+                                    unoptimized
+                                    className="h-[72px] w-[72px] object-contain"
+                                  />
                                 ) : (
                                   <div className="h-[72px] w-[72px]" />
                                 )
                               ) : rollStage === "spinning_player" ? (
                                 <div className="flex items-center gap-2">
                                   {lastTeamLogo ? (
-                                    <Image src={lastTeamLogo} alt={lastTeamName} width={72} height={72} className="h-[72px] w-[72px] object-contain" />
+                                    <Image
+                                      src={lastTeamLogo}
+                                      alt={lastTeamName}
+                                      width={72}
+                                      height={72}
+                                      unoptimized
+                                      className="h-[72px] w-[72px] object-contain"
+                                    />
                                   ) : (
                                     <div className="h-[72px] w-[72px]" />
                                   )}
@@ -145,6 +166,7 @@ export function MainInfoCard({
                                     alt={player?.name ?? "Player"}
                                     width={72}
                                     height={72}
+                                    unoptimized
                                     className="h-[72px] w-[72px] rounded-2xl object-contain"
                                   />
                                 </div>

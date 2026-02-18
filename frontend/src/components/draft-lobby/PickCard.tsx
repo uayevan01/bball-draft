@@ -39,6 +39,7 @@ export function PickCard({
             alt={pick.player_name}
             width={56}
             height={56}
+            unoptimized
             className="h-14 w-14 flex-none rounded-lg object-contain"
           />
           <div className="min-w-0">
@@ -91,6 +92,7 @@ export function PickCard({
                               alt={s.team?.abbreviation ?? "Team logo"}
                               width={18}
                               height={18}
+                              unoptimized
                               className="h-[18px] w-[18px] rounded-sm object-contain"
                             />
                           ) : null}
