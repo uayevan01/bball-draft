@@ -42,7 +42,7 @@ function perGame(total: number | null | undefined, games: number | null | undefi
 
 type StatsView = "per_game" | "totals";
 
-type SeasonSortKey =
+type CountingSortKey =
   | "season"
   | "team"
   | "games"
@@ -61,13 +61,13 @@ type SeasonSortKey =
   | "blk"
   | "tov"
   | "pf"
-  | "pts"
-  | "per"
-  | "ws"
-  | "bpm"
-  | "vorp";
+  | "pts";
 
-const SEASON_STAT_COLUMNS: Array<{ key: SeasonSortKey; label: string }> = [
+type AdvancedSortKey = "season" | "team" | "games" | "per" | "ws" | "bpm" | "vorp";
+
+type SeasonSortKey = CountingSortKey | AdvancedSortKey;
+
+const COUNTING_COLUMNS: Array<{ key: CountingSortKey; label: string }> = [
   { key: "season", label: "Season" },
   { key: "team", label: "Tm" },
   { key: "games", label: "G" },
@@ -87,6 +87,12 @@ const SEASON_STAT_COLUMNS: Array<{ key: SeasonSortKey; label: string }> = [
   { key: "tov", label: "TOV" },
   { key: "pf", label: "PF" },
   { key: "pts", label: "PTS" },
+];
+
+const ADVANCED_COLUMNS: Array<{ key: AdvancedSortKey; label: string }> = [
+  { key: "season", label: "Season" },
+  { key: "team", label: "Tm" },
+  { key: "games", label: "G" },
   { key: "per", label: "PER" },
   { key: "ws", label: "WS" },
   { key: "bpm", label: "BPM" },
@@ -134,6 +140,44 @@ function seasonSortValue(
     return raw / g;
   }
   return raw;
+}
+
+function sortSeasonRows(
+  rows: PlayerSeasonStat[],
+  sortKey: SeasonSortKey,
+  sortDir: "asc" | "desc",
+  view: StatsView,
+  teamsById: Record<number, Team>,
+): PlayerSeasonStat[] {
+  const sorted = [...rows];
+  const dir = sortDir === "asc" ? 1 : -1;
+  const labelFor = (teamId: number) => {
+    const t = teamsById[teamId];
+    return t?.abbreviation || t?.name || String(teamId);
+  };
+  sorted.sort((a, b) => {
+    const av = seasonSortValue(a, sortKey, view, labelFor(a.team_id));
+    const bv = seasonSortValue(b, sortKey, view, labelFor(b.team_id));
+    if (av == null && bv == null) return a.id - b.id;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    if (typeof av === "string" && typeof bv === "string") {
+      const cmp = av.localeCompare(bv);
+      return cmp !== 0 ? cmp * dir : a.id - b.id;
+    }
+    const an = Number(av);
+    const bn = Number(bv);
+    if (an !== bn) return (an - bn) * dir;
+    const ay = a.season?.start_year ?? 0;
+    const by = b.season?.start_year ?? 0;
+    if (ay !== by) return ay - by;
+    return a.team_id - b.team_id;
+  });
+  return sorted;
+}
+
+function defaultSortDir(key: SeasonSortKey): "asc" | "desc" {
+  return key === "season" || key === "team" ? "asc" : "desc";
 }
 
 type AwardEntry = {
@@ -249,8 +293,10 @@ export default function PlayerDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [statsView, setStatsView] = useState<StatsView>("per_game");
-  const [sortKey, setSortKey] = useState<SeasonSortKey>("season");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [countingSortKey, setCountingSortKey] = useState<CountingSortKey>("season");
+  const [countingSortDir, setCountingSortDir] = useState<"asc" | "desc">("asc");
+  const [advancedSortKey, setAdvancedSortKey] = useState<AdvancedSortKey>("season");
+  const [advancedSortDir, setAdvancedSortDir] = useState<"asc" | "desc">("asc");
 
   useEffect(() => {
     if (!Number.isFinite(playerId)) {
@@ -295,33 +341,16 @@ export default function PlayerDetailPage() {
     return t?.abbreviation || t?.name || String(teamId);
   }
 
-  const seasonRows = useMemo(() => {
-    const rows = [...(stats?.rows ?? [])];
-    const dir = sortDir === "asc" ? 1 : -1;
-    const labelFor = (teamId: number) => {
-      const t = teamsById[teamId];
-      return t?.abbreviation || t?.name || String(teamId);
-    };
-    rows.sort((a, b) => {
-      const av = seasonSortValue(a, sortKey, statsView, labelFor(a.team_id));
-      const bv = seasonSortValue(b, sortKey, statsView, labelFor(b.team_id));
-      if (av == null && bv == null) return a.id - b.id;
-      if (av == null) return 1;
-      if (bv == null) return -1;
-      if (typeof av === "string" && typeof bv === "string") {
-        const cmp = av.localeCompare(bv);
-        return cmp !== 0 ? cmp * dir : a.id - b.id;
-      }
-      const an = Number(av);
-      const bn = Number(bv);
-      if (an !== bn) return (an - bn) * dir;
-      const ay = a.season?.start_year ?? 0;
-      const by = b.season?.start_year ?? 0;
-      if (ay !== by) return ay - by;
-      return a.team_id - b.team_id;
-    });
-    return rows;
-  }, [stats, sortKey, sortDir, statsView, teamsById]);
+  const countingRows = useMemo(
+    () => sortSeasonRows(stats?.rows ?? [], countingSortKey, countingSortDir, statsView, teamsById),
+    [stats, countingSortKey, countingSortDir, statsView, teamsById],
+  );
+
+  const advancedRows = useMemo(
+    // Advanced rates don't depend on per-game vs totals.
+    () => sortSeasonRows(stats?.rows ?? [], advancedSortKey, advancedSortDir, "totals", teamsById),
+    [stats, advancedSortKey, advancedSortDir, teamsById],
+  );
 
   const awardGroups = useMemo(() => {
     const abbr = (teamId: number | null | undefined) => {
@@ -332,14 +361,22 @@ export default function PlayerDetailPage() {
     return groupAwards(awards, abbr);
   }, [awards, teamsById]);
 
-  function toggleSort(key: SeasonSortKey) {
-    if (sortKey === key) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+  function toggleCountingSort(key: CountingSortKey) {
+    if (countingSortKey === key) {
+      setCountingSortDir((d) => (d === "asc" ? "desc" : "asc"));
       return;
     }
-    setSortKey(key);
-    // First click: season/team asc; stats desc (highest first).
-    setSortDir(key === "season" || key === "team" ? "asc" : "desc");
+    setCountingSortKey(key);
+    setCountingSortDir(defaultSortDir(key));
+  }
+
+  function toggleAdvancedSort(key: AdvancedSortKey) {
+    if (advancedSortKey === key) {
+      setAdvancedSortDir((d) => (d === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setAdvancedSortKey(key);
+    setAdvancedSortDir(defaultSortDir(key));
   }
 
   return (
@@ -396,23 +433,8 @@ export default function PlayerDetailPage() {
                   {formatDraftYear(player.draft_year, player.draft_round, player.draft_pick)}
                 </div>
               </div>
-              {stats?.totals ? (
-                <div className="mt-4 flex flex-wrap gap-2 text-sm">
-                  <StatChip label="GP" value={fmt(stats.totals.games)} />
-                  <StatChip label="PTS" value={fmt(stats.totals.pts)} />
-                  <StatChip label="TRB" value={fmt(stats.totals.trb)} />
-                  <StatChip label="AST" value={fmt(stats.totals.ast)} />
-                  <StatChip label="STL" value={fmt(stats.totals.stl)} />
-                  <StatChip label="BLK" value={fmt(stats.totals.blk)} />
-                  <StatChip label="PER" value={fmt(stats.totals.per, 1)} />
-                  <StatChip label="WS" value={fmt(stats.totals.ws, 1)} />
-                  <StatChip label="VORP" value={fmt(stats.totals.vorp, 1)} />
-                </div>
-              ) : (
-                <p className="mt-4 text-sm text-zinc-500">No season stats scraped for this player yet.</p>
-              )}
               {awardGroups.length > 0 ? (
-                <div className="mt-3 flex flex-wrap gap-2 text-sm">
+                <div className="mt-4 flex flex-wrap gap-2 text-sm">
                   {awardGroups.map((g) => (
                     <AwardChip key={g.key} group={g} />
                   ))}
@@ -497,44 +519,83 @@ export default function PlayerDetailPage() {
               <table className="min-w-full text-left text-xs sm:text-sm">
                 <thead className="border-b border-black/10 text-[11px] uppercase tracking-wide text-zinc-500 dark:border-white/10">
                   <tr>
-                    {SEASON_STAT_COLUMNS.map((col) => {
-                      const active = sortKey === col.key;
-                      return (
-                        <th
-                          key={col.key}
-                          className="whitespace-nowrap px-2 py-2 font-medium first:pl-4 last:pr-4"
-                        >
-                          <button
-                            type="button"
-                            onClick={() => toggleSort(col.key)}
-                            className={[
-                              "inline-flex items-center gap-1 hover:text-zinc-950 dark:hover:text-white",
-                              active ? "text-zinc-950 dark:text-white" : "",
-                            ].join(" ")}
-                          >
-                            <span>{col.label}</span>
-                            <span className="tabular-nums text-[10px] opacity-70">
-                              {active ? (sortDir === "asc" ? "↑" : "↓") : ""}
-                            </span>
-                          </button>
-                        </th>
-                      );
-                    })}
+                    {COUNTING_COLUMNS.map((col) => (
+                      <SortableTh
+                        key={col.key}
+                        label={col.label}
+                        active={countingSortKey === col.key}
+                        dir={countingSortDir}
+                        onClick={() => toggleCountingSort(col.key)}
+                      />
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {seasonRows.length === 0 ? (
+                  {countingRows.length === 0 ? (
                     <tr>
-                      <td colSpan={23} className="px-4 py-6 text-zinc-500">
+                      <td colSpan={COUNTING_COLUMNS.length} className="px-4 py-6 text-zinc-500">
                         No season rows.
                       </td>
                     </tr>
                   ) : (
-                    seasonRows.map((row) => (
-                      <SeasonRow key={row.id} row={row} teamLabel={teamAbbr(row.team_id)} view={statsView} />
+                    countingRows.map((row) => (
+                      <CountingSeasonRow
+                        key={row.id}
+                        row={row}
+                        teamLabel={teamAbbr(row.team_id)}
+                        view={statsView}
+                      />
                     ))
                   )}
                 </tbody>
+                {stats?.totals && countingRows.length > 0 ? (
+                  <tfoot>
+                    <CountingCareerRow totals={stats.totals} view={statsView} />
+                  </tfoot>
+                ) : null}
+              </table>
+            </div>
+          </section>
+
+          <section>
+            <h2 className="text-lg font-semibold tracking-tight">Advanced</h2>
+            <div className="mt-3 overflow-x-auto rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-zinc-900/40">
+              <table className="min-w-full text-left text-xs sm:text-sm">
+                <thead className="border-b border-black/10 text-[11px] uppercase tracking-wide text-zinc-500 dark:border-white/10">
+                  <tr>
+                    {ADVANCED_COLUMNS.map((col) => (
+                      <SortableTh
+                        key={col.key}
+                        label={col.label}
+                        active={advancedSortKey === col.key}
+                        dir={advancedSortDir}
+                        onClick={() => toggleAdvancedSort(col.key)}
+                      />
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {advancedRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={ADVANCED_COLUMNS.length} className="px-4 py-6 text-zinc-500">
+                        No season rows.
+                      </td>
+                    </tr>
+                  ) : (
+                    advancedRows.map((row) => (
+                      <AdvancedSeasonRow
+                        key={row.id}
+                        row={row}
+                        teamLabel={teamAbbr(row.team_id)}
+                      />
+                    ))
+                  )}
+                </tbody>
+                {stats?.totals && advancedRows.length > 0 ? (
+                  <tfoot>
+                    <AdvancedCareerRow totals={stats.totals} />
+                  </tfoot>
+                ) : null}
               </table>
             </div>
           </section>
@@ -544,12 +605,33 @@ export default function PlayerDetailPage() {
   );
 }
 
-function StatChip({ label, value }: { label: string; value: string }) {
+function SortableTh({
+  label,
+  active,
+  dir,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  dir: "asc" | "desc";
+  onClick: () => void;
+}) {
   return (
-    <span className="inline-flex items-baseline gap-1 rounded-full border border-black/10 px-3 py-1 dark:border-white/10">
-      <span className="text-[11px] uppercase tracking-wide text-zinc-500">{label}</span>
-      <span className="font-semibold tabular-nums">{value}</span>
-    </span>
+    <th className="whitespace-nowrap px-2 py-2 font-medium first:pl-4 last:pr-4">
+      <button
+        type="button"
+        onClick={onClick}
+        className={[
+          "inline-flex items-center gap-1 hover:text-zinc-950 dark:hover:text-white",
+          active ? "text-zinc-950 dark:text-white" : "",
+        ].join(" ")}
+      >
+        <span>{label}</span>
+        <span className="tabular-nums text-[10px] opacity-70">
+          {active ? (dir === "asc" ? "↑" : "↓") : ""}
+        </span>
+      </button>
+    </th>
   );
 }
 
@@ -584,7 +666,7 @@ function AwardChip({ group }: { group: AwardGroup }) {
   );
 }
 
-function SeasonRow({
+function CountingSeasonRow({
   row,
   teamLabel,
   view,
@@ -617,11 +699,81 @@ function SeasonRow({
       <td className="px-2 py-2 tabular-nums">{counting(row.blk, 1)}</td>
       <td className="px-2 py-2 tabular-nums">{counting(row.tov, 1)}</td>
       <td className="px-2 py-2 tabular-nums">{counting(row.pf, 1)}</td>
-      <td className="px-2 py-2 tabular-nums font-medium">{counting(row.pts, 1)}</td>
+      <td className="px-2 py-2 tabular-nums font-medium last:pr-4">{counting(row.pts, 1)}</td>
+    </tr>
+  );
+}
+
+function CountingCareerRow({
+  totals,
+  view,
+}: {
+  totals: NonNullable<PlayerSeasonStatsResponse["totals"]>;
+  view: StatsView;
+}) {
+  const g = totals.games;
+  const counting = (n: number | null | undefined, digits = 1) =>
+    view === "per_game" ? perGame(n, g, digits) : fmt(n);
+
+  return (
+    <tr className="border-t-2 border-black/15 bg-zinc-50 font-semibold dark:border-white/15 dark:bg-zinc-900/80">
+      <td className="whitespace-nowrap px-2 py-2.5 first:pl-4">Career</td>
+      <td className="whitespace-nowrap px-2 py-2.5">—</td>
+      <td className="px-2 py-2.5 tabular-nums">{fmt(totals.games)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{fmt(totals.games_started)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{counting(totals.minutes, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{counting(totals.fg, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{counting(totals.fga, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{pct(totals.fg_pct)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{counting(totals.fg3, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{counting(totals.fg3a, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{counting(totals.ft, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{counting(totals.fta, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{counting(totals.trb, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{counting(totals.ast, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{counting(totals.stl, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{counting(totals.blk, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{counting(totals.tov, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{counting(totals.pf, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums last:pr-4">{counting(totals.pts, 1)}</td>
+    </tr>
+  );
+}
+
+function AdvancedSeasonRow({
+  row,
+  teamLabel,
+}: {
+  row: PlayerSeasonStat;
+  teamLabel: string;
+}) {
+  return (
+    <tr className="border-t border-black/5 dark:border-white/5">
+      <td className="whitespace-nowrap px-2 py-2 first:pl-4">{row.season?.label || row.season?.start_year || "—"}</td>
+      <td className="whitespace-nowrap px-2 py-2">{teamLabel}</td>
+      <td className="px-2 py-2 tabular-nums">{fmt(row.games)}</td>
       <td className="px-2 py-2 tabular-nums">{fmt(row.per, 1)}</td>
       <td className="px-2 py-2 tabular-nums">{fmt(row.ws, 1)}</td>
       <td className="px-2 py-2 tabular-nums">{fmt(row.bpm, 1)}</td>
       <td className="px-2 py-2 tabular-nums last:pr-4">{fmt(row.vorp, 1)}</td>
+    </tr>
+  );
+}
+
+function AdvancedCareerRow({
+  totals,
+}: {
+  totals: NonNullable<PlayerSeasonStatsResponse["totals"]>;
+}) {
+  return (
+    <tr className="border-t-2 border-black/15 bg-zinc-50 font-semibold dark:border-white/15 dark:bg-zinc-900/80">
+      <td className="whitespace-nowrap px-2 py-2.5 first:pl-4">Career</td>
+      <td className="whitespace-nowrap px-2 py-2.5">—</td>
+      <td className="px-2 py-2.5 tabular-nums">{fmt(totals.games)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{fmt(totals.per, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{fmt(totals.ws, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{fmt(totals.bpm, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums last:pr-4">{fmt(totals.vorp, 1)}</td>
     </tr>
   );
 }
