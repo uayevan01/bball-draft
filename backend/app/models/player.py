@@ -25,7 +25,7 @@ class Player(Base):
     draft_pick: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
 
     team_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id"), nullable=True, index=True)
-    # First season year from BRef A–Z index "From" column.
+    # First season start year (2003 = 2003-04). BRef A–Z index From/To are end years and are converted on seed.
     career_start_year: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     retirement_year: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     hall_of_fame: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)

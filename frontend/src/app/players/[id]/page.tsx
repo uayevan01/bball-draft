@@ -15,6 +15,12 @@ import type {
   PlayerSeasonStatsResponse,
   Team,
 } from "@/lib/playerTypes";
+import {
+  awardYearFromSeason,
+  formatCareerYears,
+  formatDraftYear,
+  formatStintYears,
+} from "@/lib/seasonYears";
 
 function fmt(n: number | null | undefined, digits = 0): string {
   if (n == null || Number.isNaN(n)) return "—";
@@ -29,19 +35,17 @@ function pct(n: number | null | undefined): string {
   return n.toFixed(3);
 }
 
-function careerYears(p: PlayerDetail): string {
-  const start = p.career_start_year;
-  const end = p.retirement_year;
-  if (start == null && end == null) return "—";
-  if (start != null && end == null) return `${start}–present`;
-  if (start != null && end != null) return `${start}–${end}`;
-  return String(end);
+function perGame(total: number | null | undefined, games: number | null | undefined, digits = 1): string {
+  if (total == null || games == null || games <= 0) return "—";
+  return (total / games).toFixed(digits);
 }
+
+type StatsView = "per_game" | "totals";
 
 type AwardEntry = {
   id: number;
   teamLabel: string;
-  /** Calendar / award year — season end year (e.g. 2009 for 2008-09). */
+  /** End year of the season (award citation year). */
   year: number;
 };
 
@@ -120,8 +124,7 @@ function groupAwards(
     for (const row of sorted) {
       const startYear = row.season?.start_year;
       if (startYear == null) continue;
-      // Awards are typically associated with the year the season ended / trophy was given.
-      const year = row.season?.end_year ?? startYear + 1;
+      const year = awardYearFromSeason(startYear, row.season?.end_year);
       const teamLabel = row.team_id != null ? teamAbbr(row.team_id) : "—";
       entries.push({ id: row.id, teamLabel, year });
     }
@@ -151,6 +154,7 @@ export default function PlayerDetailPage() {
   const [teamsById, setTeamsById] = useState<Record<number, Team>>({});
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [statsView, setStatsView] = useState<StatsView>("per_game");
 
   useEffect(() => {
     if (!Number.isFinite(playerId)) {
@@ -260,15 +264,12 @@ export default function PlayerDetailPage() {
                   <span className="text-zinc-500">Position:</span> {player.position || "—"}
                 </div>
                 <div>
-                  <span className="text-zinc-500">Years:</span> {careerYears(player)}
+                  <span className="text-zinc-500">Years:</span>{" "}
+                  {formatCareerYears(player.career_start_year, player.retirement_year)}
                 </div>
                 <div>
                   <span className="text-zinc-500">Draft:</span>{" "}
-                  {player.draft_year
-                    ? `${player.draft_year}${player.draft_round ? ` · R${player.draft_round}` : ""}${
-                        player.draft_pick ? ` · Pick ${player.draft_pick}` : ""
-                      }`
-                    : "—"}
+                  {formatDraftYear(player.draft_year, player.draft_round, player.draft_pick)}
                 </div>
               </div>
               {stats?.totals ? (
@@ -311,7 +312,7 @@ export default function PlayerDetailPage() {
                         {s.team?.abbreviation || s.team?.name || teamAbbr(s.team_id)}
                       </div>
                       <div className="text-zinc-500">
-                        {s.start_year}–{s.end_year ?? "present"}
+                        {formatStintYears(s.start_year, s.end_year)}
                         {s.team?.name ? ` · ${s.team.name}` : ""}
                       </div>
                     </li>
@@ -323,7 +324,35 @@ export default function PlayerDetailPage() {
           </section>
 
           <section>
-            <h2 className="text-lg font-semibold tracking-tight">Season totals</h2>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-lg font-semibold tracking-tight">Season stats</h2>
+              <div className="inline-flex rounded-full border border-black/10 bg-white p-1 text-sm dark:border-white/10 dark:bg-black">
+                <button
+                  type="button"
+                  onClick={() => setStatsView("per_game")}
+                  className={[
+                    "h-9 rounded-full px-4 font-semibold",
+                    statsView === "per_game"
+                      ? "bg-zinc-950 text-white dark:bg-white dark:text-black"
+                      : "text-zinc-700 hover:text-zinc-950 dark:text-zinc-300 dark:hover:text-white",
+                  ].join(" ")}
+                >
+                  Per game
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStatsView("totals")}
+                  className={[
+                    "h-9 rounded-full px-4 font-semibold",
+                    statsView === "totals"
+                      ? "bg-zinc-950 text-white dark:bg-white dark:text-black"
+                      : "text-zinc-700 hover:text-zinc-950 dark:text-zinc-300 dark:hover:text-white",
+                  ].join(" ")}
+                >
+                  Totals
+                </button>
+              </div>
+            </div>
             <div className="mt-3 overflow-x-auto rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-zinc-900/40">
               <table className="min-w-full text-left text-xs sm:text-sm">
                 <thead className="border-b border-black/10 text-[11px] uppercase tracking-wide text-zinc-500 dark:border-white/10">
@@ -367,7 +396,9 @@ export default function PlayerDetailPage() {
                       </td>
                     </tr>
                   ) : (
-                    seasonRows.map((row) => <SeasonRow key={row.id} row={row} teamLabel={teamAbbr(row.team_id)} />)
+                    seasonRows.map((row) => (
+                      <SeasonRow key={row.id} row={row} teamLabel={teamAbbr(row.team_id)} view={statsView} />
+                    ))
                   )}
                 </tbody>
               </table>
@@ -419,28 +450,40 @@ function AwardChip({ group }: { group: AwardGroup }) {
   );
 }
 
-function SeasonRow({ row, teamLabel }: { row: PlayerSeasonStat; teamLabel: string }) {
+function SeasonRow({
+  row,
+  teamLabel,
+  view,
+}: {
+  row: PlayerSeasonStat;
+  teamLabel: string;
+  view: StatsView;
+}) {
+  const g = row.games;
+  const counting = (n: number | null | undefined, digits = 1) =>
+    view === "per_game" ? perGame(n, g, digits) : fmt(n);
+
   return (
     <tr className="border-t border-black/5 dark:border-white/5">
       <td className="whitespace-nowrap px-2 py-2 first:pl-4">{row.season?.label || row.season?.start_year || "—"}</td>
       <td className="whitespace-nowrap px-2 py-2">{teamLabel}</td>
       <td className="px-2 py-2 tabular-nums">{fmt(row.games)}</td>
       <td className="px-2 py-2 tabular-nums">{fmt(row.games_started)}</td>
-      <td className="px-2 py-2 tabular-nums">{fmt(row.minutes)}</td>
-      <td className="px-2 py-2 tabular-nums">{fmt(row.fg)}</td>
-      <td className="px-2 py-2 tabular-nums">{fmt(row.fga)}</td>
+      <td className="px-2 py-2 tabular-nums">{counting(row.minutes, 1)}</td>
+      <td className="px-2 py-2 tabular-nums">{counting(row.fg, 1)}</td>
+      <td className="px-2 py-2 tabular-nums">{counting(row.fga, 1)}</td>
       <td className="px-2 py-2 tabular-nums">{pct(row.fg_pct)}</td>
-      <td className="px-2 py-2 tabular-nums">{fmt(row.fg3)}</td>
-      <td className="px-2 py-2 tabular-nums">{fmt(row.fg3a)}</td>
-      <td className="px-2 py-2 tabular-nums">{fmt(row.ft)}</td>
-      <td className="px-2 py-2 tabular-nums">{fmt(row.fta)}</td>
-      <td className="px-2 py-2 tabular-nums">{fmt(row.trb)}</td>
-      <td className="px-2 py-2 tabular-nums">{fmt(row.ast)}</td>
-      <td className="px-2 py-2 tabular-nums">{fmt(row.stl)}</td>
-      <td className="px-2 py-2 tabular-nums">{fmt(row.blk)}</td>
-      <td className="px-2 py-2 tabular-nums">{fmt(row.tov)}</td>
-      <td className="px-2 py-2 tabular-nums">{fmt(row.pf)}</td>
-      <td className="px-2 py-2 tabular-nums font-medium">{fmt(row.pts)}</td>
+      <td className="px-2 py-2 tabular-nums">{counting(row.fg3, 1)}</td>
+      <td className="px-2 py-2 tabular-nums">{counting(row.fg3a, 1)}</td>
+      <td className="px-2 py-2 tabular-nums">{counting(row.ft, 1)}</td>
+      <td className="px-2 py-2 tabular-nums">{counting(row.fta, 1)}</td>
+      <td className="px-2 py-2 tabular-nums">{counting(row.trb, 1)}</td>
+      <td className="px-2 py-2 tabular-nums">{counting(row.ast, 1)}</td>
+      <td className="px-2 py-2 tabular-nums">{counting(row.stl, 1)}</td>
+      <td className="px-2 py-2 tabular-nums">{counting(row.blk, 1)}</td>
+      <td className="px-2 py-2 tabular-nums">{counting(row.tov, 1)}</td>
+      <td className="px-2 py-2 tabular-nums">{counting(row.pf, 1)}</td>
+      <td className="px-2 py-2 tabular-nums font-medium">{counting(row.pts, 1)}</td>
       <td className="px-2 py-2 tabular-nums">{fmt(row.per, 1)}</td>
       <td className="px-2 py-2 tabular-nums">{fmt(row.ws, 1)}</td>
       <td className="px-2 py-2 tabular-nums">{fmt(row.bpm, 1)}</td>

@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { backendGet } from "@/lib/backendClient";
 import type { PlayerListItem, Team } from "@/lib/playerTypes";
+import { formatCareerYears } from "@/lib/seasonYears";
 
 const PAGE_SIZE = 50;
 
@@ -16,15 +17,6 @@ function parseOptionalInt(raw: string): number | undefined {
   if (!t) return undefined;
   const n = Number(t);
   return Number.isFinite(n) ? Math.trunc(n) : undefined;
-}
-
-function careerLabel(p: PlayerListItem): string {
-  const start = p.career_start_year;
-  const end = p.retirement_year;
-  if (start == null && end == null) return "—";
-  if (start != null && end == null) return `${start}–present`;
-  if (start != null && end != null) return `${start}–${end}`;
-  return String(end);
 }
 
 export default function PlayersPage() {
@@ -239,7 +231,9 @@ export default function PlayersPage() {
                   </td>
                   <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">{p.position || "—"}</td>
                   <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">{p.draft_year ?? "—"}</td>
-                  <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">{careerLabel(p)}</td>
+                  <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">
+                    {formatCareerYears(p.career_start_year, p.retirement_year)}
+                  </td>
                   <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">{p.hall_of_fame ? "Yes" : "—"}</td>
                 </tr>
               ))

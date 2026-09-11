@@ -5,7 +5,7 @@ import asyncio
 from collections.abc import Sequence
 from datetime import datetime, timezone
 
-from sqlalchemy import or_, select, text, update
+from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 
 from app.database import SessionLocal
@@ -363,7 +363,9 @@ async def upsert_all_players_from_index(concurrency: int = 4) -> int:
 
     - `bref_id` is the stable upsert key.
     - `position` is stored if present.
-    - `retirement_year` is treated as a best-effort "last season year" (None for active).
+    - BRef index From/To columns use season **end** years (e.g. 2004 = 2003-04).
+      We convert to season **start** years for career_start_year / retirement_year.
+    - Does not overwrite an existing real `draft_year` from draft-table scrapes.
     """
     rows = await scrape_all_players_index(concurrency=concurrency)
     if not rows:
@@ -373,19 +375,19 @@ async def upsert_all_players_from_index(concurrency: int = 4) -> int:
     values = []
     it = tqdm(rows, total=len(rows), desc="Players (A–Z)", unit="player", dynamic_ncols=True) if tqdm else rows
     for r in it:
-        # From/To columns:
-        # - year_min = "From" (you requested to map this into players.draft_year)
-        # - year_max = last season year; if equal to current year, treat as active => retirement_year NULL
+        # BRef year_min/year_max are end years of first/last season → convert to start years.
+        career_start_year = (r.year_min - 1) if r.year_min else None
         retirement_year = None
         if r.year_max and r.year_max < current_year:
-            retirement_year = r.year_max
+            retirement_year = r.year_max - 1
         values.append(
             {
                 "bref_id": r.bref_id,
                 "name": r.name,
                 "position": r.position,
-                "draft_year": r.year_min,
-                "career_start_year": r.year_min,
+                # Best-effort only for undrafted / unknown; real draft year comes from --drafts.
+                "draft_year": career_start_year,
+                "career_start_year": career_start_year,
                 "retirement_year": retirement_year,
                 "hall_of_fame": bool(getattr(r, "hall_of_fame", False)),
             }
@@ -400,7 +402,8 @@ async def upsert_all_players_from_index(concurrency: int = 4) -> int:
                 set_={
                     "name": stmt.excluded.name,
                     "position": stmt.excluded.position,
-                    "draft_year": stmt.excluded.draft_year,
+                    # Preserve draft_year when already set (e.g. from draft pages).
+                    "draft_year": func.coalesce(Player.draft_year, stmt.excluded.draft_year),
                     "career_start_year": stmt.excluded.career_start_year,
                     "retirement_year": stmt.excluded.retirement_year,
                     "hall_of_fame": stmt.excluded.hall_of_fame,
