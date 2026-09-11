@@ -42,6 +42,100 @@ function perGame(total: number | null | undefined, games: number | null | undefi
 
 type StatsView = "per_game" | "totals";
 
+type SeasonSortKey =
+  | "season"
+  | "team"
+  | "games"
+  | "games_started"
+  | "minutes"
+  | "fg"
+  | "fga"
+  | "fg_pct"
+  | "fg3"
+  | "fg3a"
+  | "ft"
+  | "fta"
+  | "trb"
+  | "ast"
+  | "stl"
+  | "blk"
+  | "tov"
+  | "pf"
+  | "pts"
+  | "per"
+  | "ws"
+  | "bpm"
+  | "vorp";
+
+const SEASON_STAT_COLUMNS: Array<{ key: SeasonSortKey; label: string }> = [
+  { key: "season", label: "Season" },
+  { key: "team", label: "Tm" },
+  { key: "games", label: "G" },
+  { key: "games_started", label: "GS" },
+  { key: "minutes", label: "MP" },
+  { key: "fg", label: "FG" },
+  { key: "fga", label: "FGA" },
+  { key: "fg_pct", label: "FG%" },
+  { key: "fg3", label: "3P" },
+  { key: "fg3a", label: "3PA" },
+  { key: "ft", label: "FT" },
+  { key: "fta", label: "FTA" },
+  { key: "trb", label: "TRB" },
+  { key: "ast", label: "AST" },
+  { key: "stl", label: "STL" },
+  { key: "blk", label: "BLK" },
+  { key: "tov", label: "TOV" },
+  { key: "pf", label: "PF" },
+  { key: "pts", label: "PTS" },
+  { key: "per", label: "PER" },
+  { key: "ws", label: "WS" },
+  { key: "bpm", label: "BPM" },
+  { key: "vorp", label: "VORP" },
+];
+
+const PER_GAME_SORT_KEYS = new Set<SeasonSortKey>([
+  "minutes",
+  "fg",
+  "fga",
+  "fg3",
+  "fg3a",
+  "ft",
+  "fta",
+  "trb",
+  "ast",
+  "stl",
+  "blk",
+  "tov",
+  "pf",
+  "pts",
+]);
+
+function seasonSortValue(
+  row: PlayerSeasonStat,
+  key: SeasonSortKey,
+  view: StatsView,
+  teamLabel: string,
+): number | string | null {
+  if (key === "season") return row.season?.start_year ?? null;
+  if (key === "team") return teamLabel;
+  if (key === "games") return row.games ?? null;
+  if (key === "games_started") return row.games_started ?? null;
+  if (key === "fg_pct") return row.fg_pct ?? null;
+  if (key === "per") return row.per ?? null;
+  if (key === "ws") return row.ws ?? null;
+  if (key === "bpm") return row.bpm ?? null;
+  if (key === "vorp") return row.vorp ?? null;
+
+  const raw = (row[key as keyof PlayerSeasonStat] as number | null | undefined) ?? null;
+  if (raw == null) return null;
+  if (view === "per_game" && PER_GAME_SORT_KEYS.has(key)) {
+    const g = row.games;
+    if (g == null || g <= 0) return null;
+    return raw / g;
+  }
+  return raw;
+}
+
 type AwardEntry = {
   id: number;
   teamLabel: string;
@@ -155,6 +249,8 @@ export default function PlayerDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [statsView, setStatsView] = useState<StatsView>("per_game");
+  const [sortKey, setSortKey] = useState<SeasonSortKey>("season");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
   useEffect(() => {
     if (!Number.isFinite(playerId)) {
@@ -193,15 +289,39 @@ export default function PlayerDetailPage() {
     };
   }, [getToken, playerId]);
 
+  function teamAbbr(teamId: number | null | undefined): string {
+    if (teamId == null) return "—";
+    const t = teamsById[teamId];
+    return t?.abbreviation || t?.name || String(teamId);
+  }
+
   const seasonRows = useMemo(() => {
-    const rows = stats?.rows ?? [];
-    return [...rows].sort((a, b) => {
+    const rows = [...(stats?.rows ?? [])];
+    const dir = sortDir === "asc" ? 1 : -1;
+    const labelFor = (teamId: number) => {
+      const t = teamsById[teamId];
+      return t?.abbreviation || t?.name || String(teamId);
+    };
+    rows.sort((a, b) => {
+      const av = seasonSortValue(a, sortKey, statsView, labelFor(a.team_id));
+      const bv = seasonSortValue(b, sortKey, statsView, labelFor(b.team_id));
+      if (av == null && bv == null) return a.id - b.id;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (typeof av === "string" && typeof bv === "string") {
+        const cmp = av.localeCompare(bv);
+        return cmp !== 0 ? cmp * dir : a.id - b.id;
+      }
+      const an = Number(av);
+      const bn = Number(bv);
+      if (an !== bn) return (an - bn) * dir;
       const ay = a.season?.start_year ?? 0;
       const by = b.season?.start_year ?? 0;
       if (ay !== by) return ay - by;
       return a.team_id - b.team_id;
     });
-  }, [stats]);
+    return rows;
+  }, [stats, sortKey, sortDir, statsView, teamsById]);
 
   const awardGroups = useMemo(() => {
     const abbr = (teamId: number | null | undefined) => {
@@ -212,10 +332,14 @@ export default function PlayerDetailPage() {
     return groupAwards(awards, abbr);
   }, [awards, teamsById]);
 
-  function teamAbbr(teamId: number | null | undefined): string {
-    if (teamId == null) return "—";
-    const t = teamsById[teamId];
-    return t?.abbreviation || t?.name || String(teamId);
+  function toggleSort(key: SeasonSortKey) {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortKey(key);
+    // First click: season/team asc; stats desc (highest first).
+    setSortDir(key === "season" || key === "team" ? "asc" : "desc");
   }
 
   return (
@@ -306,14 +430,30 @@ export default function PlayerDetailPage() {
                   .map((s) => (
                     <li
                       key={s.id}
-                      className="rounded-xl border border-black/10 bg-white px-4 py-3 text-sm dark:border-white/10 dark:bg-zinc-900/40"
+                      className="flex items-center gap-3 rounded-xl border border-black/10 bg-white px-4 py-3 text-sm dark:border-white/10 dark:bg-zinc-900/40"
                     >
-                      <div className="font-medium">
-                        {s.team?.abbreviation || s.team?.name || teamAbbr(s.team_id)}
-                      </div>
-                      <div className="text-zinc-500">
-                        {formatStintYears(s.start_year, s.end_year)}
-                        {s.team?.name ? ` · ${s.team.name}` : ""}
+                      {s.team?.logo_url ? (
+                        <Image
+                          src={s.team.logo_url}
+                          alt=""
+                          width={36}
+                          height={36}
+                          className="h-9 w-9 object-contain"
+                          unoptimized
+                        />
+                      ) : (
+                        <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-zinc-200 text-[10px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                          {(s.team?.abbreviation || "?").slice(0, 3)}
+                        </span>
+                      )}
+                      <div className="min-w-0">
+                        <div className="font-medium">
+                          {s.team?.abbreviation || s.team?.name || teamAbbr(s.team_id)}
+                        </div>
+                        <div className="text-zinc-500">
+                          {formatStintYears(s.start_year, s.end_year)}
+                          {s.team?.name ? ` · ${s.team.name}` : ""}
+                        </div>
                       </div>
                     </li>
                   ))}
@@ -357,35 +497,29 @@ export default function PlayerDetailPage() {
               <table className="min-w-full text-left text-xs sm:text-sm">
                 <thead className="border-b border-black/10 text-[11px] uppercase tracking-wide text-zinc-500 dark:border-white/10">
                   <tr>
-                    {[
-                      "Season",
-                      "Tm",
-                      "G",
-                      "GS",
-                      "MP",
-                      "FG",
-                      "FGA",
-                      "FG%",
-                      "3P",
-                      "3PA",
-                      "FT",
-                      "FTA",
-                      "TRB",
-                      "AST",
-                      "STL",
-                      "BLK",
-                      "TOV",
-                      "PF",
-                      "PTS",
-                      "PER",
-                      "WS",
-                      "BPM",
-                      "VORP",
-                    ].map((h) => (
-                      <th key={h} className="whitespace-nowrap px-2 py-2 font-medium first:pl-4 last:pr-4">
-                        {h}
-                      </th>
-                    ))}
+                    {SEASON_STAT_COLUMNS.map((col) => {
+                      const active = sortKey === col.key;
+                      return (
+                        <th
+                          key={col.key}
+                          className="whitespace-nowrap px-2 py-2 font-medium first:pl-4 last:pr-4"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => toggleSort(col.key)}
+                            className={[
+                              "inline-flex items-center gap-1 hover:text-zinc-950 dark:hover:text-white",
+                              active ? "text-zinc-950 dark:text-white" : "",
+                            ].join(" ")}
+                          >
+                            <span>{col.label}</span>
+                            <span className="tabular-nums text-[10px] opacity-70">
+                              {active ? (sortDir === "asc" ? "↑" : "↓") : ""}
+                            </span>
+                          </button>
+                        </th>
+                      );
+                    })}
                   </tr>
                 </thead>
                 <tbody>
