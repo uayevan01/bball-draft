@@ -56,6 +56,10 @@ python -m alembic -c alembic.ini upgrade head
 cd backend
 python -m app.scraper.seed --teams
 python -m app.scraper.seed --drafts 1980 1985
+python -m app.scraper.seed --all-players
+python -m app.scraper.seed --player-stints
+python -m app.scraper.seed --player-stats --player-awards
+# Optional: --bref-id jamesle01 --force --limit 10
 ```
 
 ### 4) Start the frontend

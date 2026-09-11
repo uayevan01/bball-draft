@@ -73,6 +73,83 @@ class BRefPlayerStintRow:
     end_year: int | None
 
 
+@dataclass(frozen=True)
+class BRefSeasonStatRow:
+    bref_id: str
+    start_year: int
+    team_abbreviation: str
+    games: int | None = None
+    games_started: int | None = None
+    minutes: int | None = None
+    fg: int | None = None
+    fga: int | None = None
+    fg3: int | None = None
+    fg3a: int | None = None
+    fg2: int | None = None
+    fg2a: int | None = None
+    ft: int | None = None
+    fta: int | None = None
+    orb: int | None = None
+    drb: int | None = None
+    trb: int | None = None
+    ast: int | None = None
+    stl: int | None = None
+    blk: int | None = None
+    tov: int | None = None
+    pf: int | None = None
+    pts: int | None = None
+    fg_pct: float | None = None
+    fg3_pct: float | None = None
+    fg2_pct: float | None = None
+    efg_pct: float | None = None
+    ft_pct: float | None = None
+    ts_pct: float | None = None
+    per: float | None = None
+    orb_pct: float | None = None
+    drb_pct: float | None = None
+    trb_pct: float | None = None
+    ast_pct: float | None = None
+    stl_pct: float | None = None
+    blk_pct: float | None = None
+    tov_pct: float | None = None
+    usg_pct: float | None = None
+    ows: float | None = None
+    dws: float | None = None
+    ws: float | None = None
+    ws_per_48: float | None = None
+    obpm: float | None = None
+    dbpm: float | None = None
+    bpm: float | None = None
+    vorp: float | None = None
+
+
+@dataclass(frozen=True)
+class BRefAwardRow:
+    bref_id: str
+    award_slug: str
+    start_year: int
+    team_abbreviation: str | None = None
+
+
+# BRef Awards-column tokens we persist (voting ranks only when place == 1).
+_AWARD_TOKEN_TO_SLUG: dict[str, str] = {
+    "AS": "all_star",
+    "NBA1": "all_nba_1",
+    "NBA2": "all_nba_2",
+    "NBA3": "all_nba_3",
+    "DEF1": "all_defense_1",
+    "DEF2": "all_defense_2",
+}
+_AWARD_PLACE_WINNERS: dict[str, str] = {
+    "MVP": "mvp",
+    "DPOY": "dpoy",
+    "ROY": "roy",
+    "MIP": "mip",
+    "6MOY": "sixth_man",
+    "FINALSMVP": "finals_mvp",
+}
+
+
 def _clean(text: str | None) -> str | None:
     if text is None:
         return None
@@ -296,7 +373,16 @@ def _parse_int(s: str | None) -> int | None:
     if not s:
         return None
     try:
-        return int(s)
+        return int(s.replace(",", ""))
+    except ValueError:
+        return None
+
+
+def _parse_float(s: str | None) -> float | None:
+    if not s:
+        return None
+    try:
+        return float(s)
     except ValueError:
         return None
 
@@ -526,6 +612,469 @@ def seasons_to_stints(bref_id: str, seasons: dict[int, str], *, is_active: bool)
     # close last stint as current only if active; otherwise close with end_year
     _close(cur_team, cur_start, prev_year, True)
     return stints
+
+
+def _cell_text(tr: Any, *data_stats: str) -> str | None:
+    for stat in data_stats:
+        cell = tr.select_one(f'td[data-stat="{stat}"], th[data-stat="{stat}"]')
+        if cell is not None:
+            return _clean(cell.get_text())
+    return None
+
+
+def _row_season_start_year(tr: Any) -> int | None:
+    season_cell = tr.select_one('th[data-stat="year_id"], th[data-stat="season"], td[data-stat="year_id"], td[data-stat="season"]')
+    if season_cell is None:
+        return None
+    season_text = _clean(season_cell.get_text())
+    if not season_text or not re.match(r"^\d{4}-\d{2}$", season_text):
+        return None
+    return _season_text_to_start_year(season_text)
+
+
+def _row_team_abbr(tr: Any) -> str | None:
+    team_cell = tr.select_one(
+        'td[data-stat="team_name_abbr"] a, td[data-stat="team_name_abbr"], '
+        'td[data-stat="team_id"] a, td[data-stat="team_id"]'
+    )
+    if team_cell is None:
+        return None
+    abbr = _clean(team_cell.get_text())
+    if not abbr:
+        return None
+    return abbr.upper()
+
+
+def _parse_award_tokens(awards_text: str | None) -> list[str]:
+    """
+    Map BRef Awards-column tokens to award slugs.
+    Voting awards are kept only when place == 1 (e.g. MVP-1).
+    """
+    if not awards_text:
+        return []
+    out: list[str] = []
+    for raw in awards_text.split(","):
+        token = raw.strip().upper().replace(" ", "")
+        if not token:
+            continue
+        if token in _AWARD_TOKEN_TO_SLUG:
+            out.append(_AWARD_TOKEN_TO_SLUG[token])
+            continue
+        # Finals MVP appears as "Finals MVP-1" -> FINALSMVP-1 after space strip
+        m = re.match(r"^([A-Z0-9]+)-(\d+)$", token)
+        if not m:
+            continue
+        kind, place = m.group(1), int(m.group(2))
+        if place != 1:
+            continue
+        slug = _AWARD_PLACE_WINNERS.get(kind)
+        if slug:
+            out.append(slug)
+    return out
+
+
+def _parse_totals_rows(soup: BeautifulSoup, _bref_id: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """
+    Returns (per_team_stat_rows, tot_award_rows).
+    Per-team rows skip TOT; award-only rows from TOT are returned separately.
+    """
+    table = None
+    for sel in ("table#totals_stats", "table#totals"):
+        table = _find_table_including_comments(soup, sel)
+        if table is not None:
+            break
+    if table is None:
+        return [], []
+
+    rows: list[dict[str, Any]] = []
+    tot_awards: list[dict[str, Any]] = []
+    for tr in table.select("tbody tr"):
+        if tr.get("class") and "thead" in tr.get("class", []):
+            continue
+        start_year = _row_season_start_year(tr)
+        team_abbr = _row_team_abbr(tr)
+        if start_year is None or not team_abbr:
+            continue
+
+        awards_text = _cell_text(tr, "awards")
+        award_slugs = _parse_award_tokens(awards_text)
+
+        if team_abbr == "TOT":
+            if award_slugs:
+                tot_awards.append({"start_year": start_year, "awards": award_slugs})
+            continue
+
+        rows.append(
+            {
+                "start_year": start_year,
+                "team_abbreviation": team_abbr,
+                "games": _parse_int(_cell_text(tr, "games", "g")),
+                "games_started": _parse_int(_cell_text(tr, "games_started", "gs")),
+                "minutes": _parse_int(_cell_text(tr, "mp")),
+                "fg": _parse_int(_cell_text(tr, "fg")),
+                "fga": _parse_int(_cell_text(tr, "fga")),
+                "fg3": _parse_int(_cell_text(tr, "fg3")),
+                "fg3a": _parse_int(_cell_text(tr, "fg3a")),
+                "fg2": _parse_int(_cell_text(tr, "fg2")),
+                "fg2a": _parse_int(_cell_text(tr, "fg2a")),
+                "ft": _parse_int(_cell_text(tr, "ft")),
+                "fta": _parse_int(_cell_text(tr, "fta")),
+                "orb": _parse_int(_cell_text(tr, "orb")),
+                "drb": _parse_int(_cell_text(tr, "drb")),
+                "trb": _parse_int(_cell_text(tr, "trb")),
+                "ast": _parse_int(_cell_text(tr, "ast")),
+                "stl": _parse_int(_cell_text(tr, "stl")),
+                "blk": _parse_int(_cell_text(tr, "blk")),
+                "tov": _parse_int(_cell_text(tr, "tov")),
+                "pf": _parse_int(_cell_text(tr, "pf")),
+                "pts": _parse_int(_cell_text(tr, "pts")),
+                "fg_pct": _parse_float(_cell_text(tr, "fg_pct")),
+                "fg3_pct": _parse_float(_cell_text(tr, "fg3_pct")),
+                "fg2_pct": _parse_float(_cell_text(tr, "fg2_pct")),
+                "efg_pct": _parse_float(_cell_text(tr, "efg_pct")),
+                "ft_pct": _parse_float(_cell_text(tr, "ft_pct")),
+                "awards": award_slugs,
+            }
+        )
+    return rows, tot_awards
+
+
+def _parse_advanced_by_key(soup: BeautifulSoup) -> dict[tuple[int, str], dict[str, float | None]]:
+    table = None
+    for sel in ("table#advanced", "table#advanced_stats"):
+        table = _find_table_including_comments(soup, sel)
+        if table is not None:
+            break
+    if table is None:
+        return {}
+
+    out: dict[tuple[int, str], dict[str, float | None]] = {}
+    for tr in table.select("tbody tr"):
+        if tr.get("class") and "thead" in tr.get("class", []):
+            continue
+        start_year = _row_season_start_year(tr)
+        team_abbr = _row_team_abbr(tr)
+        if start_year is None or not team_abbr or team_abbr == "TOT":
+            continue
+        out[(start_year, team_abbr)] = {
+            "ts_pct": _parse_float(_cell_text(tr, "ts_pct")),
+            "per": _parse_float(_cell_text(tr, "per")),
+            "orb_pct": _parse_float(_cell_text(tr, "orb_pct")),
+            "drb_pct": _parse_float(_cell_text(tr, "drb_pct")),
+            "trb_pct": _parse_float(_cell_text(tr, "trb_pct")),
+            "ast_pct": _parse_float(_cell_text(tr, "ast_pct")),
+            "stl_pct": _parse_float(_cell_text(tr, "stl_pct")),
+            "blk_pct": _parse_float(_cell_text(tr, "blk_pct")),
+            "tov_pct": _parse_float(_cell_text(tr, "tov_pct")),
+            "usg_pct": _parse_float(_cell_text(tr, "usg_pct")),
+            "ows": _parse_float(_cell_text(tr, "ows")),
+            "dws": _parse_float(_cell_text(tr, "dws")),
+            "ws": _parse_float(_cell_text(tr, "ws")),
+            "ws_per_48": _parse_float(_cell_text(tr, "ws_per_48")),
+            "obpm": _parse_float(_cell_text(tr, "obpm")),
+            "dbpm": _parse_float(_cell_text(tr, "dbpm")),
+            "bpm": _parse_float(_cell_text(tr, "bpm")),
+            "vorp": _parse_float(_cell_text(tr, "vorp")),
+        }
+    return out
+
+
+def _parse_playoff_finals_mvp(soup: BeautifulSoup, bref_id: str) -> list[BRefAwardRow]:
+    table = None
+    for sel in (
+        "table#totals_stats_post",
+        "table#per_game_stats_post",
+        "table#playoffs_totals",
+        "table#playoffs_totals_stats",
+        "table#playoffs_per_game",
+    ):
+        table = _find_table_including_comments(soup, sel)
+        if table is not None:
+            break
+    if table is None:
+        return []
+
+    out: list[BRefAwardRow] = []
+    seen: set[int] = set()
+    for tr in table.select("tbody tr"):
+        if tr.get("class") and "thead" in tr.get("class", []):
+            continue
+        start_year = _row_season_start_year(tr)
+        team_abbr = _row_team_abbr(tr)
+        if start_year is None or not team_abbr or team_abbr == "TOT":
+            continue
+        awards_text = _cell_text(tr, "awards")
+        for slug in _parse_award_tokens(awards_text):
+            if slug != "finals_mvp":
+                continue
+            if start_year in seen:
+                continue
+            seen.add(start_year)
+            out.append(
+                BRefAwardRow(
+                    bref_id=bref_id,
+                    award_slug="finals_mvp",
+                    start_year=start_year,
+                    team_abbreviation=team_abbr,
+                )
+            )
+    return out
+
+
+def _parse_notable_finals_mvp(soup: BeautifulSoup, bref_id: str) -> list[BRefAwardRow]:
+    """Fallback: notable-awards leaderboard lists 'YYYY Finals Most Valuable Player'."""
+    block = soup.select_one("#leaderboard_notable-awards")
+    if block is None:
+        for c in soup.find_all(string=lambda x: isinstance(x, Comment)):
+            if "leaderboard_notable-awards" in c:
+                inner = BeautifulSoup(c, "lxml")
+                block = inner.select_one("#leaderboard_notable-awards")
+                if block is not None:
+                    break
+    if block is None:
+        return []
+
+    out: list[BRefAwardRow] = []
+    for a in block.select("a[href*='finals_mvp']"):
+        text = _clean(a.get_text()) or ""
+        # e.g. "2012 Finals Most Valuable Player ..." => end year 2012 => start 2011
+        m = re.match(r"^(\d{4})\s+Finals", text)
+        if not m:
+            continue
+        end_year = int(m.group(1))
+        out.append(
+            BRefAwardRow(
+                bref_id=bref_id,
+                award_slug="finals_mvp",
+                start_year=end_year - 1,
+                team_abbreviation=None,
+            )
+        )
+    return out
+
+
+def _parse_championships(soup: BeautifulSoup, bref_id: str) -> list[BRefAwardRow]:
+    """
+    BRef championship leaderboard uses league/end year in links (NBA_2012 = 2011-12).
+    """
+    block = _find_table_including_comments(soup, "#leaderboard_championships")
+    # leaderboard is a div, not a table — fall back to comment/DOM search
+    if block is None:
+        block = soup.select_one("#leaderboard_championships")
+        if block is None:
+            for c in soup.find_all(string=lambda x: isinstance(x, Comment)):
+                if "leaderboard_championships" in c:
+                    inner = BeautifulSoup(c, "lxml")
+                    block = inner.select_one("#leaderboard_championships")
+                    if block is not None:
+                        break
+    if block is None:
+        return []
+
+    out: list[BRefAwardRow] = []
+    for a in block.select("a[href*='/teams/']"):
+        href = a.get("href") or ""
+        m = re.search(r"/teams/([A-Z]{3})/(\d{4})\.html", href)
+        if not m:
+            continue
+        team_abbr = m.group(1).upper()
+        end_year = int(m.group(2))
+        start_year = end_year - 1
+        out.append(
+            BRefAwardRow(
+                bref_id=bref_id,
+                award_slug="championship",
+                start_year=start_year,
+                team_abbreviation=team_abbr,
+            )
+        )
+    return out
+
+
+def _parse_all_rookie(soup: BeautifulSoup, bref_id: str) -> list[BRefAwardRow]:
+    block = soup.select_one("#leaderboard_all_league")
+    if block is None:
+        for c in soup.find_all(string=lambda x: isinstance(x, Comment)):
+            if "leaderboard_all_league" in c:
+                inner = BeautifulSoup(c, "lxml")
+                block = inner.select_one("#leaderboard_all_league")
+                if block is not None:
+                    break
+    if block is None:
+        return []
+
+    out: list[BRefAwardRow] = []
+    for span in block.select("span"):
+        text = _clean(span.get_text()) or ""
+        m = re.search(r"(\d{4})-(\d{2})\s+All-Rookie\s*\((1st|2nd)\)", text, re.I)
+        if not m:
+            continue
+        start_year = int(m.group(1))
+        tier = m.group(3).lower()
+        slug = "all_rookie_1" if tier == "1st" else "all_rookie_2"
+        out.append(
+            BRefAwardRow(
+                bref_id=bref_id,
+                award_slug=slug,
+                start_year=start_year,
+                team_abbreviation=None,
+            )
+        )
+    return out
+
+
+def _primary_team_by_season(totals_rows: list[dict[str, Any]]) -> dict[int, str]:
+    """Pick the team with the most games for each season (for awards lacking a team)."""
+    best: dict[int, tuple[str, int]] = {}
+    for row in totals_rows:
+        start_year = int(row["start_year"])
+        team = str(row["team_abbreviation"])
+        games = int(row.get("games") or 0)
+        cur = best.get(start_year)
+        if cur is None or games >= cur[1]:
+            best[start_year] = (team, games)
+    return {year: team for year, (team, _) in best.items()}
+
+
+async def scrape_player_stats_and_awards(
+    bref_id: str,
+) -> tuple[list[BRefSeasonStatRow], list[BRefAwardRow]]:
+    """
+    Fetch a player page once and return per-team season totals (+ advanced) and awards.
+    Skips BRef TOT rows.
+    """
+    first_letter = bref_id[0].lower()
+    url = f"{_BREF_BASE}/players/{first_letter}/{bref_id}.html"
+    async with httpx.AsyncClient(headers={"User-Agent": "nba-draft-app/1.0"}) as client:
+        await asyncio.sleep(0.3)
+        html = await _get(client, url)
+
+    soup = BeautifulSoup(html, "lxml")
+    totals_rows, tot_awards = _parse_totals_rows(soup, bref_id)
+    advanced = _parse_advanced_by_key(soup)
+
+    stats: list[BRefSeasonStatRow] = []
+    award_rows: list[BRefAwardRow] = []
+    seen_awards: set[tuple[str, int]] = set()
+
+    for row in totals_rows:
+        start_year = int(row["start_year"])
+        team_abbr = str(row["team_abbreviation"])
+        adv = advanced.get((start_year, team_abbr), {})
+        stats.append(
+            BRefSeasonStatRow(
+                bref_id=bref_id,
+                start_year=start_year,
+                team_abbreviation=team_abbr,
+                games=row.get("games"),
+                games_started=row.get("games_started"),
+                minutes=row.get("minutes"),
+                fg=row.get("fg"),
+                fga=row.get("fga"),
+                fg3=row.get("fg3"),
+                fg3a=row.get("fg3a"),
+                fg2=row.get("fg2"),
+                fg2a=row.get("fg2a"),
+                ft=row.get("ft"),
+                fta=row.get("fta"),
+                orb=row.get("orb"),
+                drb=row.get("drb"),
+                trb=row.get("trb"),
+                ast=row.get("ast"),
+                stl=row.get("stl"),
+                blk=row.get("blk"),
+                tov=row.get("tov"),
+                pf=row.get("pf"),
+                pts=row.get("pts"),
+                fg_pct=row.get("fg_pct"),
+                fg3_pct=row.get("fg3_pct"),
+                fg2_pct=row.get("fg2_pct"),
+                efg_pct=row.get("efg_pct"),
+                ft_pct=row.get("ft_pct"),
+                ts_pct=adv.get("ts_pct"),
+                per=adv.get("per"),
+                orb_pct=adv.get("orb_pct"),
+                drb_pct=adv.get("drb_pct"),
+                trb_pct=adv.get("trb_pct"),
+                ast_pct=adv.get("ast_pct"),
+                stl_pct=adv.get("stl_pct"),
+                blk_pct=adv.get("blk_pct"),
+                tov_pct=adv.get("tov_pct"),
+                usg_pct=adv.get("usg_pct"),
+                ows=adv.get("ows"),
+                dws=adv.get("dws"),
+                ws=adv.get("ws"),
+                ws_per_48=adv.get("ws_per_48"),
+                obpm=adv.get("obpm"),
+                dbpm=adv.get("dbpm"),
+                bpm=adv.get("bpm"),
+                vorp=adv.get("vorp"),
+            )
+        )
+        for slug in row.get("awards") or []:
+            key = (slug, start_year)
+            if key in seen_awards:
+                continue
+            seen_awards.add(key)
+            award_rows.append(
+                BRefAwardRow(
+                    bref_id=bref_id,
+                    award_slug=slug,
+                    start_year=start_year,
+                    team_abbreviation=team_abbr,
+                )
+            )
+
+    primary_team = _primary_team_by_season(totals_rows)
+
+    for tot in tot_awards:
+        start_year = int(tot["start_year"])
+        team = primary_team.get(start_year)
+        for slug in tot.get("awards") or []:
+            key = (slug, start_year)
+            if key in seen_awards:
+                continue
+            seen_awards.add(key)
+            award_rows.append(
+                BRefAwardRow(
+                    bref_id=bref_id,
+                    award_slug=slug,
+                    start_year=start_year,
+                    team_abbreviation=team,
+                )
+            )
+
+    for extra in (
+        _parse_playoff_finals_mvp(soup, bref_id)
+        + _parse_notable_finals_mvp(soup, bref_id)
+        + _parse_championships(soup, bref_id)
+        + _parse_all_rookie(soup, bref_id)
+    ):
+        key = (extra.award_slug, extra.start_year)
+        if key in seen_awards:
+            continue
+        team = extra.team_abbreviation or primary_team.get(extra.start_year)
+        seen_awards.add(key)
+        award_rows.append(
+            BRefAwardRow(
+                bref_id=bref_id,
+                award_slug=extra.award_slug,
+                start_year=extra.start_year,
+                team_abbreviation=team,
+            )
+        )
+
+    return stats, award_rows
+
+
+async def scrape_player_season_stats(bref_id: str) -> list[BRefSeasonStatRow]:
+    stats, _awards = await scrape_player_stats_and_awards(bref_id)
+    return stats
+
+
+async def scrape_player_awards(bref_id: str) -> list[BRefAwardRow]:
+    _stats, awards = await scrape_player_stats_and_awards(bref_id)
+    return awards
 
 
 async def scrape_draft_year(draft_year: int) -> list[BRefDraftRow]:

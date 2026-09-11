@@ -10,9 +10,9 @@ from sqlalchemy.dialects.postgresql import insert
 
 from app.database import SessionLocal
 from app.config import settings
-from app.models import Player, PlayerTeamStint, Team
+from app.models import Award, Player, PlayerAward, PlayerSeasonStat, PlayerTeamStint, Season, Team
 from app.scraper.basketball_reference import scrape_all_players_index, scrape_drafts, scrape_teams, scrape_team_logo
-from app.scraper.basketball_reference import scrape_player_team_seasons, seasons_to_stints
+from app.scraper.basketball_reference import scrape_player_team_seasons, scrape_player_stats_and_awards, seasons_to_stints
 
 try:
     from tqdm.auto import tqdm  # type: ignore[import-not-found]
@@ -594,6 +594,257 @@ async def backfill_retired_stint_end_years(session) -> int:
     return int(res.rowcount or 0)
 
 
+def _season_label(start_year: int) -> str:
+    return f"{start_year}-{str(start_year + 1)[-2:]}"
+
+
+async def _ensure_seasons(session, start_years: Sequence[int]) -> dict[int, int]:
+    """
+    Resolve start_year -> season.id.
+
+    Seasons are prefilled by migration (1946+). This only inserts any missing
+    future / edge-case years the catalog does not yet include.
+    """
+    years = sorted({int(y) for y in start_years})
+    if not years:
+        return {}
+    existing = (
+        await session.execute(select(Season).where(Season.start_year.in_(years)))
+    ).scalars().all()
+    by_year = {s.start_year: s.id for s in existing}
+    missing = [y for y in years if y not in by_year]
+    if missing:
+        values = [
+            {
+                "start_year": y,
+                "end_year": y + 1,
+                "label": _season_label(y),
+            }
+            for y in missing
+        ]
+        stmt = insert(Season).values(values)
+        stmt = stmt.on_conflict_do_nothing(constraint="uq_seasons_start_year")
+        await session.execute(stmt)
+        await session.flush()
+        existing = (
+            await session.execute(select(Season).where(Season.start_year.in_(years)))
+        ).scalars().all()
+        by_year = {s.start_year: s.id for s in existing}
+    return by_year
+
+
+_STAT_UPDATE_FIELDS = (
+    "games",
+    "games_started",
+    "minutes",
+    "fg",
+    "fga",
+    "fg3",
+    "fg3a",
+    "fg2",
+    "fg2a",
+    "ft",
+    "fta",
+    "orb",
+    "drb",
+    "trb",
+    "ast",
+    "stl",
+    "blk",
+    "tov",
+    "pf",
+    "pts",
+    "fg_pct",
+    "fg3_pct",
+    "fg2_pct",
+    "efg_pct",
+    "ft_pct",
+    "ts_pct",
+    "per",
+    "orb_pct",
+    "drb_pct",
+    "trb_pct",
+    "ast_pct",
+    "stl_pct",
+    "blk_pct",
+    "tov_pct",
+    "usg_pct",
+    "ows",
+    "dws",
+    "ws",
+    "ws_per_48",
+    "obpm",
+    "dbpm",
+    "bpm",
+    "vorp",
+    "scraped_at",
+)
+
+
+async def upsert_player_season_stats_and_awards(
+    *,
+    concurrency: int = 3,
+    limit: int | None = None,
+    bref_id: str | None = None,
+    force: bool = False,
+    commit_every_players: int = 10,
+    do_stats: bool = True,
+    do_awards: bool = True,
+) -> tuple[int, int]:
+    """
+    Scrape player pages and upsert season stats and/or awards.
+    Returns (stats_rows_upserted, award_rows_upserted) approximate counts.
+    """
+    if not do_stats and not do_awards:
+        return 0, 0
+
+    print(f"[player-stats/awards] using DATABASE_URL={settings.database_url}")
+
+    async with SessionLocal() as session:
+        abbr_to_team_id = await _team_abbr_map(session)
+        award_rows = (await session.execute(select(Award))).scalars().all()
+        slug_to_award_id = {a.slug: a.id for a in award_rows}
+
+        stmt = select(Player.id, Player.bref_id).where(Player.bref_id.is_not(None))
+        if bref_id:
+            stmt = stmt.where(Player.bref_id == bref_id)
+        elif not force:
+            conditions = []
+            if do_stats:
+                conditions.append(Player.stats_scraped_at.is_(None))
+            if do_awards:
+                conditions.append(Player.awards_scraped_at.is_(None))
+            stmt = stmt.where(or_(*conditions))
+        stmt = stmt.order_by(Player.id.asc())
+        if limit:
+            stmt = stmt.limit(limit)
+        players = (await session.execute(stmt)).all()
+
+    sem = asyncio.Semaphore(max(1, concurrency))
+
+    async def _scrape(player_bref_id: str):
+        async with sem:
+            return await scrape_player_stats_and_awards(player_bref_id)
+
+    total_stats = 0
+    total_awards = 0
+    total_players = len(players)
+    bar = (
+        tqdm(total=total_players, desc="Player stats/awards", unit="player", dynamic_ncols=True)
+        if tqdm
+        else None
+    )
+
+    batch_stats: list[dict] = []
+    batch_awards: list[dict] = []
+    batch_player_ids: list[int] = []
+    commit_every_players = max(1, commit_every_players)
+    errors = 0
+
+    async with SessionLocal() as session:
+        async def _flush() -> None:
+            nonlocal total_stats, total_awards
+            if not batch_player_ids:
+                return
+            if batch_stats:
+                stmt_ins = insert(PlayerSeasonStat).values(batch_stats)
+                stmt_ins = stmt_ins.on_conflict_do_update(
+                    constraint="uq_player_season_stats_player_season_team",
+                    set_={field: getattr(stmt_ins.excluded, field) for field in _STAT_UPDATE_FIELDS},
+                )
+                await session.execute(stmt_ins)
+                total_stats += len(batch_stats)
+            if batch_awards:
+                stmt_ins = insert(PlayerAward).values(batch_awards)
+                stmt_ins = stmt_ins.on_conflict_do_update(
+                    constraint="uq_player_awards_player_award_season",
+                    set_={"team_id": stmt_ins.excluded.team_id},
+                )
+                await session.execute(stmt_ins)
+                total_awards += len(batch_awards)
+
+            values: dict = {}
+            now = datetime.now(timezone.utc)
+            if do_stats:
+                values["stats_scraped_at"] = now
+            if do_awards:
+                values["awards_scraped_at"] = now
+            await session.execute(update(Player).where(Player.id.in_(batch_player_ids)).values(**values))
+            await session.commit()
+            batch_stats.clear()
+            batch_awards.clear()
+            batch_player_ids.clear()
+
+        for i, (player_id, player_bref_id) in enumerate(players, 1):
+            if not player_bref_id:
+                continue
+            try:
+                stats, awards = await _scrape(player_bref_id)
+                now = datetime.now(timezone.utc)
+                start_years = [s.start_year for s in stats] + [a.start_year for a in awards]
+                season_ids = await _ensure_seasons(session, start_years)
+
+                if do_stats:
+                    for s in stats:
+                        abbr = ABBR_ALIASES.get(s.team_abbreviation.upper(), s.team_abbreviation.upper())
+                        team_id = abbr_to_team_id.get(abbr)
+                        season_id = season_ids.get(s.start_year)
+                        if not team_id or not season_id:
+                            continue
+                        row = {
+                            "player_id": player_id,
+                            "season_id": season_id,
+                            "team_id": team_id,
+                            "scraped_at": now,
+                        }
+                        for field in _STAT_UPDATE_FIELDS:
+                            if field == "scraped_at":
+                                continue
+                            row[field] = getattr(s, field, None)
+                        batch_stats.append(row)
+
+                if do_awards:
+                    for a in awards:
+                        award_id = slug_to_award_id.get(a.award_slug)
+                        season_id = season_ids.get(a.start_year)
+                        if not award_id or not season_id:
+                            continue
+                        team_id = None
+                        if a.team_abbreviation:
+                            abbr = ABBR_ALIASES.get(a.team_abbreviation.upper(), a.team_abbreviation.upper())
+                            team_id = abbr_to_team_id.get(abbr)
+                        batch_awards.append(
+                            {
+                                "player_id": player_id,
+                                "award_id": award_id,
+                                "season_id": season_id,
+                                "team_id": team_id,
+                            }
+                        )
+                batch_player_ids.append(player_id)
+            except Exception:  # pylint: disable=broad-exception-caught
+                errors += 1
+                if not bar:
+                    print(f"Error on player_id={player_id} bref_id={player_bref_id}")
+
+            if bar:
+                bar.update(1)
+            elif i == 1 or i % 25 == 0 or i == total_players:
+                print(f"Processed {i}/{total_players} players…")
+
+            if len(batch_player_ids) >= commit_every_players:
+                await _flush()
+
+        await _flush()
+
+    if bar:
+        bar.close()
+    if errors and not bar:
+        print(f"Done with {errors} errors. Re-run to retry failed players.")
+    print(f"[player-stats/awards] stats~={total_stats} awards~={total_awards}")
+    return total_stats, total_awards
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Seed Teams/Players from Basketball Reference.")
     parser.add_argument("--teams", action="store_true", help="Scrape and upsert Teams")
@@ -601,6 +852,8 @@ def main() -> None:
     parser.add_argument("--drafts", nargs=2, type=int, metavar=("START_YEAR", "END_YEAR"), help="Scrape drafts and upsert Players")
     parser.add_argument("--all-players", action="store_true", help="Scrape ALL players A–Z (drafted + undrafted) and upsert by bref_id")
     parser.add_argument("--player-stints", action="store_true", help="Scrape player pages and populate player_team_stints")
+    parser.add_argument("--player-stats", action="store_true", help="Scrape player pages and upsert player_season_stats")
+    parser.add_argument("--player-awards", action="store_true", help="Scrape player pages and upsert player_awards")
     parser.add_argument(
         "--backfill-retired-stint-ends",
         action="store_true",
@@ -609,7 +862,7 @@ def main() -> None:
     parser.add_argument("--concurrency", type=int, default=4, help="Concurrency for web scraping (default: 4)")
     parser.add_argument("--limit", type=int, default=None, help="Optional limit (for testing) for certain seed modes")
     parser.add_argument("--bref-id", type=str, default=None, help="Only process one player by bref_id (e.g. jamesle01)")
-    parser.add_argument("--force", action="store_true", help="Reprocess even if stints_scraped_at is set (dangerous)")
+    parser.add_argument("--force", action="store_true", help="Reprocess even if scrape timestamps are set")
     parser.add_argument("--commit-every", type=int, default=10, help="Commit after N successful players (default: 10)")
     args = parser.parse_args()
 
@@ -638,6 +891,20 @@ def main() -> None:
                 commit_every_players=args.commit_every,
             )
             print(f"Inserted player team stints (approx): {n}")
+        if args.player_stats or args.player_awards:
+            n_stats, n_awards = await upsert_player_season_stats_and_awards(
+                concurrency=args.concurrency,
+                limit=args.limit,
+                bref_id=args.bref_id,
+                force=args.force,
+                commit_every_players=args.commit_every,
+                do_stats=bool(args.player_stats),
+                do_awards=bool(args.player_awards),
+            )
+            if args.player_stats:
+                print(f"Upserted player season stats (approx): {n_stats}")
+            if args.player_awards:
+                print(f"Upserted player awards (approx): {n_awards}")
 
     asyncio.run(_run())
 

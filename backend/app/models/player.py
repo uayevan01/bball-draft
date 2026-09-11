@@ -31,6 +31,8 @@ class Player(Base):
     hall_of_fame: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
     position: Mapped[str | None] = mapped_column(String(30), nullable=True, index=True)
     stints_scraped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    stats_scraped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    awards_scraped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     image_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     image_scraped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
 
@@ -38,6 +40,12 @@ class Player(Base):
     draft_picks: Mapped[list["DraftPick"]] = relationship("DraftPick", back_populates="player")
     team_stints: Mapped[list["PlayerTeamStint"]] = relationship(
         "PlayerTeamStint", back_populates="player", cascade="all, delete-orphan"
+    )
+    season_stats: Mapped[list["PlayerSeasonStat"]] = relationship(
+        "PlayerSeasonStat", back_populates="player", cascade="all, delete-orphan"
+    )
+    player_awards: Mapped[list["PlayerAward"]] = relationship(
+        "PlayerAward", back_populates="player", cascade="all, delete-orphan"
     )
 
 

@@ -449,16 +449,45 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
     const cancelledRef = { cancelled: false };
     const ensureLen = <T,>(arr: T[], fill: T): T[] => (arr.length === rollCount ? arr : Array.from({ length: rollCount }, () => fill));
 
-    // Decade animation with exponential slowdown
+    // Year animation with exponential slowdown:
+    // - If rules select decades, spin decade labels
+    // - Otherwise, spin specific years
     if (rollStage === "spinning_decade") {
-      const decadeOptions =
-        (rules?.year_constraint?.type === "decade" && rules?.year_constraint?.options?.length
-          ? rules.year_constraint.options
-          : ["1950-1959", "1960-1969", "1970-1979", "1980-1989", "1990-1999", "2000-2009", "2010-2019", "2020-2029"]) ?? [];
+      const yearOptions = (() => {
+        const yc = rules?.year_constraint;
+        if (!yc) return ["1950", "1960", "1970", "1980", "1990", "2000", "2010", "2020"];
+        if (yc.type === "decade") {
+          return yc.options?.length
+            ? yc.options
+            : ["1950-1959", "1960-1969", "1970-1979", "1980-1989", "1990-1999", "2000-2009", "2010-2019", "2020-2029"];
+        }
+        if (yc.type === "specific" && yc.options?.length) {
+          return yc.options.map((y) => String(y));
+        }
+        if (yc.type === "range") {
+          const start = Math.min(yc.options.startYear, yc.options.endYear);
+          const end = Math.max(yc.options.startYear, yc.options.endYear);
+          const years: string[] = [];
+          // Keep the pool sane; animation is just cosmetic.
+          const maxSpan = 250;
+          const span = Math.max(0, end - start);
+          if (span > maxSpan) {
+            for (let y = start; y <= end; y += 5) years.push(String(y));
+            if (years[years.length - 1] !== String(end)) years.push(String(end));
+            return years;
+          }
+          for (let y = start; y <= end; y++) years.push(String(y));
+          return years;
+        }
+        // "any": default to a modern-ish window
+        const years: string[] = [];
+        for (let y = 1950; y <= 2029; y++) years.push(String(y));
+        return years;
+      })();
       setSpinPreviewDecades(ensureLen([], null));
       for (let i = 0; i < rollCount; i++) {
         scheduleSpin<string | null>(
-          decadeOptions.map((x) => x ?? null),
+          yearOptions.map((x) => x ?? null),
           (v) =>
             setSpinPreviewDecades((prev) => {
               const next = ensureLen([...prev], null);
@@ -472,16 +501,18 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
       }
     }
 
-    // Team animation: fetch a pool for the decade and cycle quickly through it.
+    // Team animation: fetch a pool for the rolled year window and cycle quickly through it.
     let cancelled = false;
     async function startTeamSpin() {
       if (rollStage !== "spinning_team") return;
       const label = rollStageDecadeLabel ?? null;
-      const m = label ? /^(\d{4})-(\d{4})$/.exec(label) : null;
-      if (!m) return;
-      const start = Number(m[1]);
-      const end = Number(m[2]);
+      const rangeLike = label ? /^(\d{4})-(\d{4})$/.exec(label) : null;
+      const yearLike = label ? /^(\d{4})$/.exec(label) : null;
+      const start = rangeLike ? Number(rangeLike[1]) : yearLike ? Number(yearLike[1]) : null;
+      const end = rangeLike ? Number(rangeLike[2]) : yearLike ? Number(yearLike[1]) : null;
       try {
+        const qs =
+          start != null && end != null ? `active_start_year=${start}&active_end_year=${end}&limit=500` : `limit=500`;
         const teams = await backendGet<
           Array<{
             id: number;
@@ -491,7 +522,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
             conference?: string | null;
             division?: string | null;
           }>
-        >(`/teams?active_start_year=${start}&active_end_year=${end}&limit=500`);
+        >(`/teams?${qs}`);
         if (cancelled) return;
 
         let pool = teams;

@@ -103,18 +103,78 @@ def _roll_count_from_rules(rules: dict) -> int:
 
 
 async def _roll_year(rules: dict) -> tuple[str, int | None, int | None]:
+    """
+    If rules explicitly select decades, roll a decade window.
+    Otherwise, roll a single specific year (start=end=that year).
+    """
     year_constraint = rules.get("year_constraint") if isinstance(rules.get("year_constraint"), dict) else {}
-    decade_options: list[str] = []
-    if year_constraint.get("type") == "decade" and isinstance(year_constraint.get("options"), list):
-        decade_options = [str(x) for x in year_constraint.get("options") if isinstance(x, str)]
-    if not decade_options:
-        decade_options = list(_DECADE_LABELS)
-    year_label = random.choice(decade_options)
-    parsed = _parse_decade_label(year_label)
-    if not parsed:
-        raise RuntimeError("Invalid decade options in rules")
-    start_year, end_year = parsed
-    return year_label, start_year, end_year
+    t = year_constraint.get("type")
+    opts = year_constraint.get("options")
+
+    # "Decades" mode: pick a decade label and parse to [start,end].
+    if t == "decade":
+        decade_options: list[str] = []
+        if isinstance(opts, list):
+            decade_options = [str(x) for x in opts if isinstance(x, str)]
+        if not decade_options:
+            decade_options = list(_DECADE_LABELS)
+        year_label = random.choice(decade_options)
+        parsed = _parse_decade_label(year_label)
+        if not parsed:
+            raise RuntimeError("Invalid decade options in rules")
+        start_year, end_year = parsed
+        return year_label, start_year, end_year
+
+    # Range mode: pick a random year inside the range.
+    if t == "range" and isinstance(opts, dict):
+        try:
+            start = int(opts.get("startYear"))
+            end = int(opts.get("endYear"))
+        except Exception:  # noqa: BLE001
+            start, end = 1950, 2029
+        if start > end:
+            start, end = end, start
+        year = random.randint(start, end)
+        return str(year), year, year
+
+    # Specific mode: pick one of the configured years.
+    if t == "specific" and isinstance(opts, list) and opts:
+        years: list[int] = []
+        for x in opts:
+            try:
+                years.append(int(x))
+            except Exception:  # noqa: BLE001
+                continue
+        if years:
+            year = random.choice(years)
+            return str(year), year, year
+
+    # Any/unknown mode: pick a year from data bounds if possible.
+    min_year, max_year = 1950, 2029
+    try:
+        from app.models import PlayerTeamStint  # local import to avoid circular
+
+        async with SessionLocal() as db:
+            current_year = datetime.now(timezone.utc).year
+            stmt = select(
+                func.min(PlayerTeamStint.start_year),
+                func.max(func.coalesce(PlayerTeamStint.end_year, current_year)),
+            )
+            row = (await db.execute(stmt)).first()
+            if row:
+                mn, mx = row
+                if isinstance(mn, int):
+                    min_year = mn
+                if isinstance(mx, int):
+                    max_year = mx
+    except Exception:  # noqa: BLE001
+        # Fall back to a reasonable window when DB stats aren't available.
+        pass
+
+    if min_year > max_year:
+        min_year, max_year = max_year, min_year
+    year = random.randint(min_year, max_year)
+    return str(year), year, year
 
 
 async def _roll_team(*, year_start: int | None, year_end: int | None, rules: dict) -> list[dict]:
