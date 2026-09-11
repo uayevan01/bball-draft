@@ -38,6 +38,108 @@ function careerYears(p: PlayerDetail): string {
   return String(end);
 }
 
+type AwardEntry = {
+  id: number;
+  teamLabel: string;
+  /** Calendar / award year — season end year (e.g. 2009 for 2008-09). */
+  year: number;
+};
+
+type AwardGroup = {
+  key: string;
+  slug: string;
+  name: string;
+  count: number;
+  entries: AwardEntry[];
+};
+
+const AWARD_SHORT_LABELS: Record<string, string> = {
+  championship: "NBA Champion",
+  finals_mvp: "Finals MVP",
+  mvp: "MVP",
+  dpoy: "DPOY",
+  all_star: "All-Star",
+  all_nba_1: "All-NBA 1st",
+  all_nba_2: "All-NBA 2nd",
+  all_nba_3: "All-NBA 3rd",
+  all_defense_1: "All-Defense 1st",
+  all_defense_2: "All-Defense 2nd",
+  roy: "ROY",
+  all_rookie_1: "All-Rookie 1st",
+  all_rookie_2: "All-Rookie 2nd",
+  mip: "MIP",
+  sixth_man: "6MOY",
+};
+
+/** Display order for award chips on the player page. */
+const AWARD_DISPLAY_ORDER: string[] = [
+  "championship",
+  "finals_mvp",
+  "mvp",
+  "dpoy",
+  "all_star",
+  "all_nba_1",
+  "all_nba_2",
+  "all_nba_3",
+  "all_defense_1",
+  "all_defense_2",
+  "roy",
+  "all_rookie_1",
+  "all_rookie_2",
+  "mip",
+  "sixth_man",
+];
+
+function awardSortKey(slug: string): number {
+  const idx = AWARD_DISPLAY_ORDER.indexOf(slug);
+  return idx === -1 ? AWARD_DISPLAY_ORDER.length + 1 : idx;
+}
+
+function groupAwards(
+  awards: PlayerAward[],
+  teamAbbr: (teamId: number | null | undefined) => string,
+): AwardGroup[] {
+  const bySlug = new Map<string, PlayerAward[]>();
+  for (const a of awards) {
+    const slug = a.award?.slug || `award-${a.award_id}`;
+    const list = bySlug.get(slug) ?? [];
+    list.push(a);
+    bySlug.set(slug, list);
+  }
+
+  const groups: AwardGroup[] = [];
+  for (const [slug, rows] of bySlug) {
+    const sorted = [...rows].sort((a, b) => {
+      const ay = a.season?.start_year ?? 0;
+      const by = b.season?.start_year ?? 0;
+      if (ay !== by) return ay - by;
+      return (a.team_id ?? 0) - (b.team_id ?? 0);
+    });
+
+    const entries: AwardEntry[] = [];
+    for (const row of sorted) {
+      const startYear = row.season?.start_year;
+      if (startYear == null) continue;
+      // Awards are typically associated with the year the season ended / trophy was given.
+      const year = row.season?.end_year ?? startYear + 1;
+      const teamLabel = row.team_id != null ? teamAbbr(row.team_id) : "—";
+      entries.push({ id: row.id, teamLabel, year });
+    }
+
+    const name = AWARD_SHORT_LABELS[slug] || sorted[0]?.award?.name || slug;
+    groups.push({
+      key: slug,
+      slug,
+      name,
+      count: sorted.length,
+      entries,
+    });
+  }
+
+  groups.sort((a, b) => awardSortKey(a.slug) - awardSortKey(b.slug) || a.name.localeCompare(b.name));
+  return groups;
+}
+
 export default function PlayerDetailPage() {
   const params = useParams<{ id: string }>();
   const playerId = Number(params.id);
@@ -97,14 +199,14 @@ export default function PlayerDetailPage() {
     });
   }, [stats]);
 
-  const awardsSorted = useMemo(() => {
-    return [...awards].sort((a, b) => {
-      const ay = a.season?.start_year ?? 0;
-      const by = b.season?.start_year ?? 0;
-      if (ay !== by) return by - ay;
-      return (a.award?.name || "").localeCompare(b.award?.name || "");
-    });
-  }, [awards]);
+  const awardGroups = useMemo(() => {
+    const abbr = (teamId: number | null | undefined) => {
+      if (teamId == null) return "—";
+      const t = teamsById[teamId];
+      return t?.abbreviation || t?.name || String(teamId);
+    };
+    return groupAwards(awards, abbr);
+  }, [awards, teamsById]);
 
   function teamAbbr(teamId: number | null | undefined): string {
     if (teamId == null) return "—";
@@ -170,7 +272,7 @@ export default function PlayerDetailPage() {
                 </div>
               </div>
               {stats?.totals ? (
-                <div className="mt-4 flex flex-wrap gap-4 text-sm">
+                <div className="mt-4 flex flex-wrap gap-2 text-sm">
                   <StatChip label="GP" value={fmt(stats.totals.games)} />
                   <StatChip label="PTS" value={fmt(stats.totals.pts)} />
                   <StatChip label="TRB" value={fmt(stats.totals.trb)} />
@@ -184,6 +286,13 @@ export default function PlayerDetailPage() {
               ) : (
                 <p className="mt-4 text-sm text-zinc-500">No season stats scraped for this player yet.</p>
               )}
+              {awardGroups.length > 0 ? (
+                <div className="mt-3 flex flex-wrap gap-2 text-sm">
+                  {awardGroups.map((g) => (
+                    <AwardChip key={g.key} group={g} />
+                  ))}
+                </div>
+              ) : null}
             </div>
           </section>
 
@@ -264,30 +373,6 @@ export default function PlayerDetailPage() {
               </table>
             </div>
           </section>
-
-          <section>
-            <h2 className="text-lg font-semibold tracking-tight">Awards & resume</h2>
-            {awardsSorted.length === 0 ? (
-              <p className="mt-2 text-sm text-zinc-500">No awards on file.</p>
-            ) : (
-              <ul className="mt-3 grid gap-2">
-                {awardsSorted.map((a) => (
-                  <li
-                    key={a.id}
-                    className="flex flex-wrap items-baseline justify-between gap-2 rounded-xl border border-black/10 bg-white px-4 py-3 text-sm dark:border-white/10 dark:bg-zinc-900/40"
-                  >
-                    <div>
-                      <span className="font-medium">{a.award?.name || a.award?.slug || "Award"}</span>
-                      {a.team_id ? (
-                        <span className="text-zinc-500"> · {teamAbbr(a.team_id)}</span>
-                      ) : null}
-                    </div>
-                    <div className="text-zinc-500">{a.season?.label || a.season?.start_year || "—"}</div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
         </div>
       ) : null}
     </AppShell>
@@ -299,6 +384,37 @@ function StatChip({ label, value }: { label: string; value: string }) {
     <span className="inline-flex items-baseline gap-1 rounded-full border border-black/10 px-3 py-1 dark:border-white/10">
       <span className="text-[11px] uppercase tracking-wide text-zinc-500">{label}</span>
       <span className="font-semibold tabular-nums">{value}</span>
+    </span>
+  );
+}
+
+function AwardChip({ group }: { group: AwardGroup }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <span
+      className="relative inline-flex"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <span className="inline-flex cursor-default items-baseline gap-1 rounded-full border border-black/10 px-3 py-1 dark:border-white/10">
+        <span className="text-[11px] uppercase tracking-wide text-zinc-500">{group.name}</span>
+        <span className="font-semibold tabular-nums">{group.count}×</span>
+      </span>
+      {open && group.entries.length > 0 ? (
+        // pt-1 keeps a hover bridge across the gap so the menu stays open while moving onto it.
+        <span className="absolute left-0 top-full z-20 pt-1">
+          <span className="block max-h-64 min-w-40 overflow-y-auto overscroll-contain rounded-xl border border-black/10 bg-white px-3 py-2 text-xs text-zinc-700 shadow-lg dark:border-white/10 dark:bg-zinc-900 dark:text-zinc-200">
+            <ul className="grid gap-1">
+              {group.entries.map((e) => (
+                <li key={e.id} className="whitespace-nowrap tabular-nums">
+                  {e.teamLabel} {e.year}
+                </li>
+              ))}
+            </ul>
+          </span>
+        </span>
+      ) : null}
     </span>
   );
 }
