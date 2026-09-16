@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useAuth } from "@clerk/nextjs";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import type { MouseEvent as ReactMouseEvent } from "react";
 
 import { AppShell } from "@/components/AppShell";
 import { backendGet } from "@/lib/backendClient";
@@ -281,6 +282,35 @@ function groupAwards(
   return groups;
 }
 
+/**
+ * Season id -> accolade labels, ordered like the summary chips.
+ * Keyed by season alone, so a mid-season trade shows the accolade on both team rows.
+ */
+function awardsBySeasonId(awards: PlayerAward[]): Map<number, string[]> {
+  const sorted = [...awards].sort(
+    (a, b) => awardSortKey(a.award?.slug || "") - awardSortKey(b.award?.slug || ""),
+  );
+
+  const map = new Map<number, string[]>();
+  for (const row of sorted) {
+    const slug = row.award?.slug || `award-${row.award_id}`;
+    const label = AWARD_SHORT_LABELS[slug] || row.award?.name || slug;
+    const list = map.get(row.season_id) ?? [];
+    if (!list.includes(label)) list.push(label);
+    map.set(row.season_id, list);
+  }
+  return map;
+}
+
+type SeasonHover = {
+  title: string;
+  accolades: string[];
+  x: number;
+  y: number;
+};
+
+const HOVER_WIDTH_PX = 240;
+
 export default function PlayerDetailPage() {
   const params = useParams<{ id: string }>();
   const playerId = Number(params.id);
@@ -297,6 +327,7 @@ export default function PlayerDetailPage() {
   const [countingSortDir, setCountingSortDir] = useState<"asc" | "desc">("asc");
   const [advancedSortKey, setAdvancedSortKey] = useState<AdvancedSortKey>("season");
   const [advancedSortDir, setAdvancedSortDir] = useState<"asc" | "desc">("asc");
+  const [seasonHover, setSeasonHover] = useState<SeasonHover | null>(null);
 
   useEffect(() => {
     if (!Number.isFinite(playerId)) {
@@ -360,6 +391,25 @@ export default function PlayerDetailPage() {
     };
     return groupAwards(awards, abbr);
   }, [awards, teamsById]);
+
+  const awardsBySeason = useMemo(() => awardsBySeasonId(awards), [awards]);
+
+  function showSeasonHover(
+    e: ReactMouseEvent<HTMLTableRowElement>,
+    row: PlayerSeasonStat,
+    accolades: string[],
+  ) {
+    const seasonLabel = row.season?.label || row.season?.start_year || "—";
+    setSeasonHover({
+      title: `${seasonLabel} · ${teamAbbr(row.team_id)}`,
+      accolades,
+      // Clamped to the viewport so the card stays visible near the edges.
+      x: Math.min(e.clientX + 16, window.innerWidth - HOVER_WIDTH_PX - 16),
+      y: Math.min(Math.max(e.clientY, 72), window.innerHeight - 48),
+    });
+  }
+
+  const hideSeasonHover = () => setSeasonHover(null);
 
   function toggleCountingSort(key: CountingSortKey) {
     if (countingSortKey === key) {
@@ -544,6 +594,9 @@ export default function PlayerDetailPage() {
                         row={row}
                         teamLabel={teamAbbr(row.team_id)}
                         view={statsView}
+                        accolades={awardsBySeason.get(row.season_id) ?? []}
+                        onHover={showSeasonHover}
+                        onLeave={hideSeasonHover}
                       />
                     ))
                   )}
@@ -587,6 +640,9 @@ export default function PlayerDetailPage() {
                         key={row.id}
                         row={row}
                         teamLabel={teamAbbr(row.team_id)}
+                        accolades={awardsBySeason.get(row.season_id) ?? []}
+                        onHover={showSeasonHover}
+                        onLeave={hideSeasonHover}
                       />
                     ))
                   )}
@@ -601,7 +657,48 @@ export default function PlayerDetailPage() {
           </section>
         </div>
       ) : null}
+
+      {seasonHover ? <SeasonAccoladesCard hover={seasonHover} /> : null}
     </AppShell>
+  );
+}
+
+function SeasonAccoladesCard({ hover }: { hover: SeasonHover }) {
+  return (
+    // Fixed so the card escapes the table's horizontal scroll container instead of being clipped.
+    <div
+      className="pointer-events-none fixed z-50 -translate-y-1/2 rounded-xl border border-black/10 bg-white px-3 py-2 shadow-lg dark:border-white/10 dark:bg-zinc-900"
+      style={{ left: hover.x, top: hover.y, width: HOVER_WIDTH_PX }}
+    >
+      <div className="text-[11px] uppercase tracking-wide text-zinc-500">{hover.title}</div>
+      <ul className="mt-1 grid gap-1 text-xs text-zinc-700 dark:text-zinc-200">
+        {hover.accolades.map((a) => (
+          <li key={a}>{a}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+type SeasonHoverHandler = (
+  e: ReactMouseEvent<HTMLTableRowElement>,
+  row: PlayerSeasonStat,
+  accolades: string[],
+) => void;
+
+function seasonRowClass(hasAccolades: boolean): string {
+  const base = "border-t border-black/5 dark:border-white/5";
+  return hasAccolades ? `${base} hover:bg-amber-500/10 dark:hover:bg-amber-500/10` : base;
+}
+
+function SeasonCellLabel({ row, hasAccolades }: { row: PlayerSeasonStat; hasAccolades: boolean }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      {row.season?.label || row.season?.start_year || "—"}
+      {hasAccolades ? (
+        <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden />
+      ) : null}
+    </span>
   );
 }
 
@@ -670,18 +767,30 @@ function CountingSeasonRow({
   row,
   teamLabel,
   view,
+  accolades,
+  onHover,
+  onLeave,
 }: {
   row: PlayerSeasonStat;
   teamLabel: string;
   view: StatsView;
+  accolades: string[];
+  onHover: SeasonHoverHandler;
+  onLeave: () => void;
 }) {
   const g = row.games;
   const counting = (n: number | null | undefined, digits = 1) =>
     view === "per_game" ? perGame(n, g, digits) : fmt(n);
 
   return (
-    <tr className="border-t border-black/5 dark:border-white/5">
-      <td className="whitespace-nowrap px-2 py-2 first:pl-4">{row.season?.label || row.season?.start_year || "—"}</td>
+    <tr
+      className={seasonRowClass(accolades.length > 0)}
+      onMouseEnter={accolades.length > 0 ? (e) => onHover(e, row, accolades) : undefined}
+      onMouseLeave={accolades.length > 0 ? onLeave : undefined}
+    >
+      <td className="whitespace-nowrap px-2 py-2 first:pl-4">
+        <SeasonCellLabel row={row} hasAccolades={accolades.length > 0} />
+      </td>
       <td className="whitespace-nowrap px-2 py-2">{teamLabel}</td>
       <td className="px-2 py-2 tabular-nums">{fmt(row.games)}</td>
       <td className="px-2 py-2 tabular-nums">{fmt(row.games_started)}</td>
@@ -743,13 +852,25 @@ function CountingCareerRow({
 function AdvancedSeasonRow({
   row,
   teamLabel,
+  accolades,
+  onHover,
+  onLeave,
 }: {
   row: PlayerSeasonStat;
   teamLabel: string;
+  accolades: string[];
+  onHover: SeasonHoverHandler;
+  onLeave: () => void;
 }) {
   return (
-    <tr className="border-t border-black/5 dark:border-white/5">
-      <td className="whitespace-nowrap px-2 py-2 first:pl-4">{row.season?.label || row.season?.start_year || "—"}</td>
+    <tr
+      className={seasonRowClass(accolades.length > 0)}
+      onMouseEnter={accolades.length > 0 ? (e) => onHover(e, row, accolades) : undefined}
+      onMouseLeave={accolades.length > 0 ? onLeave : undefined}
+    >
+      <td className="whitespace-nowrap px-2 py-2 first:pl-4">
+        <SeasonCellLabel row={row} hasAccolades={accolades.length > 0} />
+      </td>
       <td className="whitespace-nowrap px-2 py-2">{teamLabel}</td>
       <td className="px-2 py-2 tabular-nums">{fmt(row.games)}</td>
       <td className="px-2 py-2 tabular-nums">{fmt(row.per, 1)}</td>
