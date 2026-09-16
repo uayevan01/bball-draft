@@ -6,6 +6,7 @@ import { useAuth } from "@clerk/nextjs";
 import { useEffect, useMemo, useState } from "react";
 
 import { AppShell } from "@/components/AppShell";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { backendGet } from "@/lib/backendClient";
 import type { PlayerListItem, Team } from "@/lib/playerTypes";
 import { formatCareerYears } from "@/lib/seasonYears";
@@ -28,7 +29,6 @@ export default function PlayersPage() {
   const [offset, setOffset] = useState(0);
 
   const [nameQuery, setNameQuery] = useState("");
-  const [debouncedName, setDebouncedName] = useState("");
   const [teamId, setTeamId] = useState<string>("");
   const [minPts, setMinPts] = useState("");
   const [maxPts, setMaxPts] = useState("");
@@ -37,14 +37,28 @@ export default function PlayersPage() {
   const [minTrb, setMinTrb] = useState("");
   const [maxTrb, setMaxTrb] = useState("");
 
-  useEffect(() => {
-    const t = window.setTimeout(() => setDebouncedName(nameQuery.trim()), 250);
-    return () => window.clearTimeout(t);
-  }, [nameQuery]);
+  // Every typed filter is debounced so a keystroke doesn't fire a request per character.
+  // The team dropdown is a discrete choice, so it applies immediately.
+  const debouncedName = useDebouncedValue(nameQuery.trim());
+  const debouncedMinPts = useDebouncedValue(minPts);
+  const debouncedMaxPts = useDebouncedValue(maxPts);
+  const debouncedMinAst = useDebouncedValue(minAst);
+  const debouncedMaxAst = useDebouncedValue(maxAst);
+  const debouncedMinTrb = useDebouncedValue(minTrb);
+  const debouncedMaxTrb = useDebouncedValue(maxTrb);
 
   useEffect(() => {
     setOffset(0);
-  }, [debouncedName, teamId, minPts, maxPts, minAst, maxAst, minTrb, maxTrb]);
+  }, [
+    debouncedName,
+    teamId,
+    debouncedMinPts,
+    debouncedMaxPts,
+    debouncedMinAst,
+    debouncedMaxAst,
+    debouncedMinTrb,
+    debouncedMaxTrb,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -70,19 +84,29 @@ export default function PlayersPage() {
     if (debouncedName) params.set("q", debouncedName);
     if (teamId) params.set("stint_team_id", teamId);
     const bounds: Array<[string, string]> = [
-      ["min_pts", minPts],
-      ["max_pts", maxPts],
-      ["min_ast", minAst],
-      ["max_ast", maxAst],
-      ["min_trb", minTrb],
-      ["max_trb", maxTrb],
+      ["min_pts", debouncedMinPts],
+      ["max_pts", debouncedMaxPts],
+      ["min_ast", debouncedMinAst],
+      ["max_ast", debouncedMaxAst],
+      ["min_trb", debouncedMinTrb],
+      ["max_trb", debouncedMaxTrb],
     ];
     for (const [key, raw] of bounds) {
       const n = parseOptionalInt(raw);
       if (n !== undefined) params.set(key, String(n));
     }
     return params.toString();
-  }, [debouncedName, teamId, minPts, maxPts, minAst, maxAst, minTrb, maxTrb, offset]);
+  }, [
+    debouncedName,
+    teamId,
+    debouncedMinPts,
+    debouncedMaxPts,
+    debouncedMinAst,
+    debouncedMaxAst,
+    debouncedMinTrb,
+    debouncedMaxTrb,
+    offset,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
