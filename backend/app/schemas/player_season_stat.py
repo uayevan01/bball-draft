@@ -15,6 +15,7 @@ class PlayerSeasonStatOut(ORMBaseModel):
     player_id: int
     season_id: int
     team_id: int
+    is_postseason: bool = False
     season: SeasonOut | None = None
 
     games: int | None = None
@@ -117,5 +118,6 @@ class PlayerSeasonStatsAggregateOut(ORMBaseModel):
 class PlayerSeasonStatsResponse(ORMBaseModel):
     player_id: int
     aggregate: bool
+    season_type: str = "regular"
     rows: list[PlayerSeasonStatOut] = []
     totals: PlayerSeasonStatsAggregateOut | None = None

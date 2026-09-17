@@ -14,6 +14,7 @@ import type {
   PlayerDetail,
   PlayerSeasonStat,
   PlayerSeasonStatsResponse,
+  SeasonScope,
   Team,
 } from "@/lib/playerTypes";
 import {
@@ -317,12 +318,14 @@ export default function PlayerDetailPage() {
   const { getToken } = useAuth();
 
   const [player, setPlayer] = useState<PlayerDetail | null>(null);
-  const [stats, setStats] = useState<PlayerSeasonStatsResponse | null>(null);
+  const [regularStats, setRegularStats] = useState<PlayerSeasonStatsResponse | null>(null);
+  const [postseasonStats, setPostseasonStats] = useState<PlayerSeasonStatsResponse | null>(null);
   const [awards, setAwards] = useState<PlayerAward[]>([]);
   const [teamsById, setTeamsById] = useState<Record<number, Team>>({});
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [statsView, setStatsView] = useState<StatsView>("per_game");
+  const [seasonScope, setSeasonScope] = useState<SeasonScope>("regular");
   const [countingSortKey, setCountingSortKey] = useState<CountingSortKey>("season");
   const [countingSortDir, setCountingSortDir] = useState<"asc" | "desc">("asc");
   const [advancedSortKey, setAdvancedSortKey] = useState<AdvancedSortKey>("season");
@@ -341,15 +344,24 @@ export default function PlayerDetailPage() {
       setError(null);
       try {
         const token = await getToken().catch(() => null);
-        const [detail, seasonStats, awardRows, teams] = await Promise.all([
+        const [detail, seasonStats, playoffStats, awardRows, teams] = await Promise.all([
           backendGet<PlayerDetail>(`/players/${playerId}/details`, token),
-          backendGet<PlayerSeasonStatsResponse>(`/players/${playerId}/stats?aggregate=true`, token),
+          backendGet<PlayerSeasonStatsResponse>(
+            `/players/${playerId}/stats?aggregate=true&season_type=regular`,
+            token,
+          ),
+          // Separate request so each scope gets the server's minutes-weighted advanced totals.
+          backendGet<PlayerSeasonStatsResponse>(
+            `/players/${playerId}/stats?aggregate=true&season_type=postseason`,
+            token,
+          ),
           backendGet<PlayerAward[]>(`/players/${playerId}/awards`, token),
           backendGet<Team[]>("/teams?limit=500", token).catch(() => [] as Team[]),
         ]);
         if (cancelled) return;
         setPlayer(detail);
-        setStats(seasonStats);
+        setRegularStats(seasonStats);
+        setPostseasonStats(playoffStats);
         setAwards(awardRows);
         const map: Record<number, Team> = {};
         for (const t of teams) map[t.id] = t;
@@ -371,6 +383,10 @@ export default function PlayerDetailPage() {
     const t = teamsById[teamId];
     return t?.abbreviation || t?.name || String(teamId);
   }
+
+  const stats = seasonScope === "regular" ? regularStats : postseasonStats;
+  const hasPostseason = (postseasonStats?.rows.length ?? 0) > 0;
+  const scopeLabel = seasonScope === "regular" ? "Regular season" : "Playoff";
 
   const countingRows = useMemo(
     () => sortSeasonRows(stats?.rows ?? [], countingSortKey, countingSortDir, statsView, teamsById),
@@ -537,32 +553,34 @@ export default function PlayerDetailPage() {
 
           <section>
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold tracking-tight">Season stats</h2>
-              <div className="inline-flex rounded-full border border-black/10 bg-white p-1 text-sm dark:border-white/10 dark:bg-black">
-                <button
-                  type="button"
-                  onClick={() => setStatsView("per_game")}
-                  className={[
-                    "h-9 rounded-full px-4 font-semibold",
-                    statsView === "per_game"
-                      ? "bg-zinc-950 text-white dark:bg-white dark:text-black"
-                      : "text-zinc-700 hover:text-zinc-950 dark:text-zinc-300 dark:hover:text-white",
-                  ].join(" ")}
-                >
-                  Per game
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setStatsView("totals")}
-                  className={[
-                    "h-9 rounded-full px-4 font-semibold",
-                    statsView === "totals"
-                      ? "bg-zinc-950 text-white dark:bg-white dark:text-black"
-                      : "text-zinc-700 hover:text-zinc-950 dark:text-zinc-300 dark:hover:text-white",
-                  ].join(" ")}
-                >
-                  Totals
-                </button>
+              <h2 className="text-lg font-semibold tracking-tight">{scopeLabel} stats</h2>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="inline-flex rounded-full border border-black/10 bg-white p-1 text-sm dark:border-white/10 dark:bg-black">
+                  <ScopeButton
+                    label="Regular season"
+                    active={seasonScope === "regular"}
+                    onClick={() => setSeasonScope("regular")}
+                  />
+                  <ScopeButton
+                    label="Playoffs"
+                    active={seasonScope === "postseason"}
+                    disabled={!hasPostseason}
+                    title={hasPostseason ? undefined : "No playoff seasons on file"}
+                    onClick={() => setSeasonScope("postseason")}
+                  />
+                </div>
+                <div className="inline-flex rounded-full border border-black/10 bg-white p-1 text-sm dark:border-white/10 dark:bg-black">
+                  <ScopeButton
+                    label="Per game"
+                    active={statsView === "per_game"}
+                    onClick={() => setStatsView("per_game")}
+                  />
+                  <ScopeButton
+                    label="Totals"
+                    active={statsView === "totals"}
+                    onClick={() => setStatsView("totals")}
+                  />
+                </div>
               </div>
             </div>
             <div className="mt-3 overflow-x-auto rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-zinc-900/40">
@@ -611,7 +629,7 @@ export default function PlayerDetailPage() {
           </section>
 
           <section>
-            <h2 className="text-lg font-semibold tracking-tight">Advanced</h2>
+            <h2 className="text-lg font-semibold tracking-tight">{scopeLabel} advanced</h2>
             <div className="mt-3 overflow-x-auto rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-zinc-900/40">
               <table className="min-w-full text-left text-xs sm:text-sm">
                 <thead className="border-b border-black/10 text-[11px] uppercase tracking-wide text-zinc-500 dark:border-white/10">
@@ -699,6 +717,38 @@ function SeasonCellLabel({ row, hasAccolades }: { row: PlayerSeasonStat; hasAcco
         <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden />
       ) : null}
     </span>
+  );
+}
+
+function ScopeButton({
+  label,
+  active,
+  disabled,
+  title,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  disabled?: boolean;
+  title?: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={[
+        "h-9 rounded-full px-4 font-semibold",
+        active
+          ? "bg-zinc-950 text-white dark:bg-white dark:text-black"
+          : "text-zinc-700 hover:text-zinc-950 dark:text-zinc-300 dark:hover:text-white",
+        disabled ? "cursor-not-allowed opacity-40 hover:text-zinc-700 dark:hover:text-zinc-300" : "",
+      ].join(" ")}
+    >
+      {label}
+    </button>
   );
 }
 

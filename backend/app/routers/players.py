@@ -42,6 +42,8 @@ _COUNTING_FIELDS = (
     "pts",
 )
 
+_SEASON_TYPES = ("regular", "postseason", "all")
+
 
 def _safe_div(num: float | None, den: float | None) -> float | None:
     if num is None or den is None or den == 0:
@@ -226,7 +228,7 @@ async def list_players(
     stint_end_year: int | None = Query(default=None, description="Filter by stint overlap end year (inclusive)"),
     min_team_stints: int | None = Query(default=None, ge=0, description="Minimum number of team stints (coalescing consecutive same-franchise stints)"),
     max_team_stints: int | None = Query(default=None, ge=0, description="Maximum number of team stints (coalescing consecutive same-franchise stints)"),
-    # Career totals (SUM across player_season_stats rows)
+    # Career totals (SUM across regular-season player_season_stats rows)
     min_pts: int | None = Query(default=None, ge=0, description="Minimum career total points"),
     max_pts: int | None = Query(default=None, ge=0, description="Maximum career total points"),
     min_trb: int | None = Query(default=None, ge=0, description="Minimum career total rebounds"),
@@ -337,6 +339,8 @@ async def list_players(
     if having_clauses:
         career_subq = (
             select(PlayerSeasonStat.player_id)
+            # "Career" means regular season; postseason rows live in the same table.
+            .where(PlayerSeasonStat.is_postseason.is_(False))
             .group_by(PlayerSeasonStat.player_id)
             .having(and_(*having_clauses))
         )
@@ -459,6 +463,10 @@ async def get_player_stats(
         default=False,
         description="If true, also return summed counting stats (and recomputed rates) for the window",
     ),
+    season_type: str = Query(
+        default="regular",
+        description='Which rows to return: "regular", "postseason", or "all"',
+    ),
     db: AsyncSession = Depends(get_db),
 ) -> PlayerSeasonStatsResponse:
     player_exists = (
@@ -490,6 +498,12 @@ async def get_player_stats(
             detail="season_start cannot exceed season_end",
         )
 
+    if season_type not in _SEASON_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"season_type must be one of: {', '.join(_SEASON_TYPES)}",
+        )
+
     stmt = (
         select(PlayerSeasonStat)
         .join(Season, Season.id == PlayerSeasonStat.season_id)
@@ -497,6 +511,10 @@ async def get_player_stats(
         .options(selectinload(PlayerSeasonStat.season))
         .order_by(Season.start_year.asc(), PlayerSeasonStat.team_id.asc())
     )
+    if season_type == "regular":
+        stmt = stmt.where(PlayerSeasonStat.is_postseason.is_(False))
+    elif season_type == "postseason":
+        stmt = stmt.where(PlayerSeasonStat.is_postseason.is_(True))
     if team_id_list:
         stmt = stmt.where(PlayerSeasonStat.team_id.in_(team_id_list))
     if season_start is not None:
@@ -518,6 +536,7 @@ async def get_player_stats(
     return PlayerSeasonStatsResponse(
         player_id=player_id,
         aggregate=aggregate,
+        season_type=season_type,
         rows=out_rows,
         totals=totals,
     )

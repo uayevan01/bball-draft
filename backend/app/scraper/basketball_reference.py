@@ -78,6 +78,7 @@ class BRefSeasonStatRow:
     bref_id: str
     start_year: int
     team_abbreviation: str
+    is_postseason: bool = False
     games: int | None = None
     games_started: int | None = None
     minutes: int | None = None
@@ -673,13 +674,32 @@ def _parse_award_tokens(awards_text: str | None) -> list[str]:
     return out
 
 
-def _parse_totals_rows(soup: BeautifulSoup, _bref_id: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+# BRef has renamed these table ids over time, so each is a fallback chain tried in order.
+_REGULAR_TOTALS_SELECTORS = ("table#totals_stats", "table#totals")
+_POSTSEASON_TOTALS_SELECTORS = (
+    "table#totals_stats_post",
+    "table#playoffs_totals",
+    "table#playoffs_totals_stats",
+)
+_REGULAR_ADVANCED_SELECTORS = ("table#advanced", "table#advanced_stats")
+_POSTSEASON_ADVANCED_SELECTORS = (
+    "table#advanced_post",
+    "table#playoffs_advanced",
+    "table#advanced_stats_post",
+)
+
+
+def _parse_totals_rows(
+    soup: BeautifulSoup,
+    _bref_id: str,
+    selectors: tuple[str, ...] = _REGULAR_TOTALS_SELECTORS,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """
     Returns (per_team_stat_rows, tot_award_rows).
     Per-team rows skip TOT; award-only rows from TOT are returned separately.
     """
     table = None
-    for sel in ("table#totals_stats", "table#totals"):
+    for sel in selectors:
         table = _find_table_including_comments(soup, sel)
         if table is not None:
             break
@@ -739,9 +759,12 @@ def _parse_totals_rows(soup: BeautifulSoup, _bref_id: str) -> tuple[list[dict[st
     return rows, tot_awards
 
 
-def _parse_advanced_by_key(soup: BeautifulSoup) -> dict[tuple[int, str], dict[str, float | None]]:
+def _parse_advanced_by_key(
+    soup: BeautifulSoup,
+    selectors: tuple[str, ...] = _REGULAR_ADVANCED_SELECTORS,
+) -> dict[tuple[int, str], dict[str, float | None]]:
     table = None
-    for sel in ("table#advanced", "table#advanced_stats"):
+    for sel in selectors:
         table = _find_table_including_comments(soup, sel)
         if table is not None:
             break
@@ -779,45 +802,98 @@ def _parse_advanced_by_key(soup: BeautifulSoup) -> dict[tuple[int, str], dict[st
     return out
 
 
-def _parse_playoff_finals_mvp(soup: BeautifulSoup, bref_id: str) -> list[BRefAwardRow]:
-    table = None
-    for sel in (
-        "table#totals_stats_post",
-        "table#per_game_stats_post",
-        "table#playoffs_totals",
-        "table#playoffs_totals_stats",
-        "table#playoffs_per_game",
-    ):
-        table = _find_table_including_comments(soup, sel)
-        if table is not None:
-            break
-    if table is None:
-        return []
+def _build_season_stat_rows(
+    bref_id: str,
+    totals_rows: list[dict[str, Any]],
+    advanced: dict[tuple[int, str], dict[str, float | None]],
+    *,
+    is_postseason: bool,
+) -> list[BRefSeasonStatRow]:
+    """Join counting totals to their advanced row by (season, team)."""
+    out: list[BRefSeasonStatRow] = []
+    for row in totals_rows:
+        start_year = int(row["start_year"])
+        team_abbr = str(row["team_abbreviation"])
+        adv = advanced.get((start_year, team_abbr), {})
+        out.append(
+            BRefSeasonStatRow(
+                bref_id=bref_id,
+                start_year=start_year,
+                team_abbreviation=team_abbr,
+                is_postseason=is_postseason,
+                games=row.get("games"),
+                games_started=row.get("games_started"),
+                minutes=row.get("minutes"),
+                fg=row.get("fg"),
+                fga=row.get("fga"),
+                fg3=row.get("fg3"),
+                fg3a=row.get("fg3a"),
+                fg2=row.get("fg2"),
+                fg2a=row.get("fg2a"),
+                ft=row.get("ft"),
+                fta=row.get("fta"),
+                orb=row.get("orb"),
+                drb=row.get("drb"),
+                trb=row.get("trb"),
+                ast=row.get("ast"),
+                stl=row.get("stl"),
+                blk=row.get("blk"),
+                tov=row.get("tov"),
+                pf=row.get("pf"),
+                pts=row.get("pts"),
+                fg_pct=row.get("fg_pct"),
+                fg3_pct=row.get("fg3_pct"),
+                fg2_pct=row.get("fg2_pct"),
+                efg_pct=row.get("efg_pct"),
+                ft_pct=row.get("ft_pct"),
+                ts_pct=adv.get("ts_pct"),
+                per=adv.get("per"),
+                orb_pct=adv.get("orb_pct"),
+                drb_pct=adv.get("drb_pct"),
+                trb_pct=adv.get("trb_pct"),
+                ast_pct=adv.get("ast_pct"),
+                stl_pct=adv.get("stl_pct"),
+                blk_pct=adv.get("blk_pct"),
+                tov_pct=adv.get("tov_pct"),
+                usg_pct=adv.get("usg_pct"),
+                ows=adv.get("ows"),
+                dws=adv.get("dws"),
+                ws=adv.get("ws"),
+                ws_per_48=adv.get("ws_per_48"),
+                obpm=adv.get("obpm"),
+                dbpm=adv.get("dbpm"),
+                bpm=adv.get("bpm"),
+                vorp=adv.get("vorp"),
+            )
+        )
+    return out
 
+
+def _playoff_finals_mvp_from_rows(
+    postseason_rows: list[dict[str, Any]],
+    bref_id: str,
+) -> list[BRefAwardRow]:
+    """
+    Finals MVP off the postseason totals Awards column.
+    Only finals_mvp is taken here; season awards come from the regular-season table.
+    """
     out: list[BRefAwardRow] = []
     seen: set[int] = set()
-    for tr in table.select("tbody tr"):
-        if tr.get("class") and "thead" in tr.get("class", []):
+    for row in postseason_rows:
+        start_year = int(row["start_year"])
+        if start_year in seen:
             continue
-        start_year = _row_season_start_year(tr)
-        team_abbr = _row_team_abbr(tr)
-        if start_year is None or not team_abbr or team_abbr == "TOT":
+        if "finals_mvp" not in (row.get("awards") or []):
             continue
-        awards_text = _cell_text(tr, "awards")
-        for slug in _parse_award_tokens(awards_text):
-            if slug != "finals_mvp":
-                continue
-            if start_year in seen:
-                continue
-            seen.add(start_year)
-            out.append(
-                BRefAwardRow(
-                    bref_id=bref_id,
-                    award_slug="finals_mvp",
-                    start_year=start_year,
-                    team_abbreviation=team_abbr,
-                )
+        seen.add(start_year)
+        out.append(
+            BRefAwardRow(
+                bref_id=bref_id,
+                award_slug="finals_mvp",
+                start_year=start_year,
+                team_abbreviation=str(row["team_abbreviation"]),
             )
+        )
     return out
 
 
@@ -941,6 +1017,7 @@ async def scrape_player_stats_and_awards(
 ) -> tuple[list[BRefSeasonStatRow], list[BRefAwardRow]]:
     """
     Fetch a player page once and return per-team season totals (+ advanced) and awards.
+    Stats cover both regular season and postseason, tagged via is_postseason.
     Skips BRef TOT rows.
     """
     first_letter = bref_id[0].lower()
@@ -952,65 +1029,24 @@ async def scrape_player_stats_and_awards(
     soup = BeautifulSoup(html, "lxml")
     totals_rows, tot_awards = _parse_totals_rows(soup, bref_id)
     advanced = _parse_advanced_by_key(soup)
+    # Postseason lives on the same page, so this costs no extra request.
+    postseason_rows, _postseason_tot_awards = _parse_totals_rows(
+        soup, bref_id, _POSTSEASON_TOTALS_SELECTORS
+    )
+    postseason_advanced = _parse_advanced_by_key(soup, _POSTSEASON_ADVANCED_SELECTORS)
 
     stats: list[BRefSeasonStatRow] = []
     award_rows: list[BRefAwardRow] = []
     seen_awards: set[tuple[str, int]] = set()
 
+    stats.extend(_build_season_stat_rows(bref_id, totals_rows, advanced, is_postseason=False))
+    stats.extend(
+        _build_season_stat_rows(bref_id, postseason_rows, postseason_advanced, is_postseason=True)
+    )
+
     for row in totals_rows:
         start_year = int(row["start_year"])
         team_abbr = str(row["team_abbreviation"])
-        adv = advanced.get((start_year, team_abbr), {})
-        stats.append(
-            BRefSeasonStatRow(
-                bref_id=bref_id,
-                start_year=start_year,
-                team_abbreviation=team_abbr,
-                games=row.get("games"),
-                games_started=row.get("games_started"),
-                minutes=row.get("minutes"),
-                fg=row.get("fg"),
-                fga=row.get("fga"),
-                fg3=row.get("fg3"),
-                fg3a=row.get("fg3a"),
-                fg2=row.get("fg2"),
-                fg2a=row.get("fg2a"),
-                ft=row.get("ft"),
-                fta=row.get("fta"),
-                orb=row.get("orb"),
-                drb=row.get("drb"),
-                trb=row.get("trb"),
-                ast=row.get("ast"),
-                stl=row.get("stl"),
-                blk=row.get("blk"),
-                tov=row.get("tov"),
-                pf=row.get("pf"),
-                pts=row.get("pts"),
-                fg_pct=row.get("fg_pct"),
-                fg3_pct=row.get("fg3_pct"),
-                fg2_pct=row.get("fg2_pct"),
-                efg_pct=row.get("efg_pct"),
-                ft_pct=row.get("ft_pct"),
-                ts_pct=adv.get("ts_pct"),
-                per=adv.get("per"),
-                orb_pct=adv.get("orb_pct"),
-                drb_pct=adv.get("drb_pct"),
-                trb_pct=adv.get("trb_pct"),
-                ast_pct=adv.get("ast_pct"),
-                stl_pct=adv.get("stl_pct"),
-                blk_pct=adv.get("blk_pct"),
-                tov_pct=adv.get("tov_pct"),
-                usg_pct=adv.get("usg_pct"),
-                ows=adv.get("ows"),
-                dws=adv.get("dws"),
-                ws=adv.get("ws"),
-                ws_per_48=adv.get("ws_per_48"),
-                obpm=adv.get("obpm"),
-                dbpm=adv.get("dbpm"),
-                bpm=adv.get("bpm"),
-                vorp=adv.get("vorp"),
-            )
-        )
         for slug in row.get("awards") or []:
             key = (slug, start_year)
             if key in seen_awards:
@@ -1045,7 +1081,7 @@ async def scrape_player_stats_and_awards(
             )
 
     for extra in (
-        _parse_playoff_finals_mvp(soup, bref_id)
+        _playoff_finals_mvp_from_rows(postseason_rows, bref_id)
         + _parse_notable_finals_mvp(soup, bref_id)
         + _parse_championships(soup, bref_id)
         + _parse_all_rookie(soup, bref_id)

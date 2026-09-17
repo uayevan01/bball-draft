@@ -715,6 +715,9 @@ async def upsert_player_season_stats_and_awards(
             conditions = []
             if do_stats:
                 conditions.append(Player.stats_scraped_at.is_(None))
+                # Lets a postseason backfill resume over players already scraped for
+                # regular season, without forcing a full re-scrape.
+                conditions.append(Player.postseason_scraped_at.is_(None))
             if do_awards:
                 conditions.append(Player.awards_scraped_at.is_(None))
             stmt = stmt.where(or_(*conditions))
@@ -752,7 +755,7 @@ async def upsert_player_season_stats_and_awards(
             if batch_stats:
                 stmt_ins = insert(PlayerSeasonStat).values(batch_stats)
                 stmt_ins = stmt_ins.on_conflict_do_update(
-                    constraint="uq_player_season_stats_player_season_team",
+                    constraint="uq_player_season_stats_player_season_team_type",
                     set_={field: getattr(stmt_ins.excluded, field) for field in _STAT_UPDATE_FIELDS},
                 )
                 await session.execute(stmt_ins)
@@ -770,6 +773,7 @@ async def upsert_player_season_stats_and_awards(
             now = datetime.now(timezone.utc)
             if do_stats:
                 values["stats_scraped_at"] = now
+                values["postseason_scraped_at"] = now
             if do_awards:
                 values["awards_scraped_at"] = now
             await session.execute(update(Player).where(Player.id.in_(batch_player_ids)).values(**values))
@@ -798,6 +802,7 @@ async def upsert_player_season_stats_and_awards(
                             "player_id": player_id,
                             "season_id": season_id,
                             "team_id": team_id,
+                            "is_postseason": bool(s.is_postseason),
                             "scraped_at": now,
                         }
                         for field in _STAT_UPDATE_FIELDS:

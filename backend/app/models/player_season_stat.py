@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -10,19 +10,28 @@ from app.models.base import Base
 
 class PlayerSeasonStat(Base):
     """
-    One row per player / season / team (no BRef TOT rows).
+    One row per player / season / team / season type (no BRef TOT rows).
     Counting stats are season totals; rate/advanced columns are denormalized for filtering.
+
+    Callers that mean "career" must filter on is_postseason; the table holds both.
     """
 
     __tablename__ = "player_season_stats"
     __table_args__ = (
-        UniqueConstraint("player_id", "season_id", "team_id", name="uq_player_season_stats_player_season_team"),
+        UniqueConstraint(
+            "player_id",
+            "season_id",
+            "team_id",
+            "is_postseason",
+            name="uq_player_season_stats_player_season_team_type",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     player_id: Mapped[int] = mapped_column(ForeignKey("players.id"), nullable=False, index=True)
     season_id: Mapped[int] = mapped_column(ForeignKey("seasons.id"), nullable=False, index=True)
     team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), nullable=False, index=True)
+    is_postseason: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
 
     # Counting (totals)
     games: Mapped[int | None] = mapped_column(Integer, nullable=True)

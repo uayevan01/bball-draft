@@ -32,6 +32,7 @@ class Player(Base):
     position: Mapped[str | None] = mapped_column(String(30), nullable=True, index=True)
     stints_scraped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     stats_scraped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    postseason_scraped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     awards_scraped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     image_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     image_scraped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)

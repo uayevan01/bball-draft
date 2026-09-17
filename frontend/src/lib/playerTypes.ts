@@ -47,6 +47,7 @@ export type PlayerSeasonStat = {
   player_id: number;
   season_id: number;
   team_id: number;
+  is_postseason?: boolean;
   season?: Season | null;
   games?: number | null;
   games_started?: number | null;
@@ -115,9 +116,12 @@ export type PlayerSeasonStatsAggregate = {
   bpm?: number | null;
 };
 
+export type SeasonScope = "regular" | "postseason";
+
 export type PlayerSeasonStatsResponse = {
   player_id: number;
   aggregate: boolean;
+  season_type?: string;
   rows: PlayerSeasonStat[];
   totals?: PlayerSeasonStatsAggregate | null;
 };
