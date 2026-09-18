@@ -771,11 +771,11 @@ export default function PlayerDetailPage() {
                       )}
                       <div className="min-w-0">
                         <div className="font-medium">
-                          {s.team?.abbreviation || s.team?.name || teamAbbr(s.team_id)}
+                          {s.team?.name || teamAbbr(s.team_id)}
                         </div>
                         <div className="text-zinc-500">
                           {formatStintYears(s.start_year, s.end_year)}
-                          {s.team?.name ? ` · ${s.team.name}` : ""}
+                          {s.team?.name ? ` · ${s.team?.abbreviation}` : ""}
                         </div>
                       </div>
                     </li>
@@ -1096,8 +1096,8 @@ function AwardChip({ group }: { group: AwardGroup }) {
       onMouseLeave={() => setOpen(false)}
     >
       <span className="inline-flex cursor-default items-baseline gap-1 rounded-full border border-black/10 px-3 py-1 dark:border-white/10">
+        <span className="font-semibold tabular-nums">{group.count}x</span>
         <span className="text-[11px] uppercase tracking-wide text-zinc-500">{group.name}</span>
-        <span className="font-semibold tabular-nums">{group.count}×</span>
       </span>
       {open && group.entries.length > 0 ? (
         // pt-1 keeps a hover bridge across the gap so the menu stays open while moving onto it.
