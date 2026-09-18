@@ -283,22 +283,26 @@ function groupAwards(
   return groups;
 }
 
+/** Labels drive the hover card; slugs drive the inline badges. */
+type SeasonAwards = { labels: string[]; slugs: Set<string> };
+
 /**
- * Season id -> accolade labels, ordered like the summary chips.
+ * Season id -> accolades, ordered like the summary chips.
  * Keyed by season alone, so a mid-season trade shows the accolade on both team rows.
  */
-function awardsBySeasonId(awards: PlayerAward[]): Map<number, string[]> {
+function awardsBySeasonId(awards: PlayerAward[]): Map<number, SeasonAwards> {
   const sorted = [...awards].sort(
     (a, b) => awardSortKey(a.award?.slug || "") - awardSortKey(b.award?.slug || ""),
   );
 
-  const map = new Map<number, string[]>();
+  const map = new Map<number, SeasonAwards>();
   for (const row of sorted) {
     const slug = row.award?.slug || `award-${row.award_id}`;
     const label = AWARD_SHORT_LABELS[slug] || row.award?.name || slug;
-    const list = map.get(row.season_id) ?? [];
-    if (!list.includes(label)) list.push(label);
-    map.set(row.season_id, list);
+    const entry = map.get(row.season_id) ?? { labels: [], slugs: new Set<string>() };
+    if (!entry.labels.includes(label)) entry.labels.push(label);
+    entry.slugs.add(slug);
+    map.set(row.season_id, entry);
   }
   return map;
 }
@@ -306,11 +310,20 @@ function awardsBySeasonId(awards: PlayerAward[]): Map<number, string[]> {
 type SeasonHover = {
   title: string;
   accolades: string[];
-  x: number;
-  y: number;
+  /** Season <td>; card re-measures this on scroll so fixed coords stay under the year. */
+  anchor: HTMLElement;
 };
 
 const HOVER_WIDTH_PX = 240;
+const HOVER_GAP_PX = 4;
+
+function positionBelowAnchor(anchor: HTMLElement): { left: number; top: number } {
+  const rect = anchor.getBoundingClientRect();
+  return {
+    left: Math.min(Math.max(8, rect.left), window.innerWidth - HOVER_WIDTH_PX - 8),
+    top: rect.bottom + HOVER_GAP_PX,
+  };
+}
 
 export default function PlayerDetailPage() {
   const params = useParams<{ id: string }>();
@@ -416,12 +429,12 @@ export default function PlayerDetailPage() {
     accolades: string[],
   ) {
     const seasonLabel = row.season?.label || row.season?.start_year || "—";
+    const seasonCell = e.currentTarget.cells[0] as HTMLElement | undefined;
+    if (!seasonCell) return;
     setSeasonHover({
       title: `${seasonLabel} · ${teamAbbr(row.team_id)}`,
       accolades,
-      // Clamped to the viewport so the card stays visible near the edges.
-      x: Math.min(e.clientX + 16, window.innerWidth - HOVER_WIDTH_PX - 16),
-      y: Math.min(Math.max(e.clientY, 72), window.innerHeight - 48),
+      anchor: seasonCell,
     });
   }
 
@@ -612,7 +625,8 @@ export default function PlayerDetailPage() {
                         row={row}
                         teamLabel={teamAbbr(row.team_id)}
                         view={statsView}
-                        accolades={awardsBySeason.get(row.season_id) ?? []}
+                        seasonAwards={awardsBySeason.get(row.season_id)}
+                        scope={seasonScope}
                         onHover={showSeasonHover}
                         onLeave={hideSeasonHover}
                       />
@@ -658,7 +672,8 @@ export default function PlayerDetailPage() {
                         key={row.id}
                         row={row}
                         teamLabel={teamAbbr(row.team_id)}
-                        accolades={awardsBySeason.get(row.season_id) ?? []}
+                        seasonAwards={awardsBySeason.get(row.season_id)}
+                        scope={seasonScope}
                         onHover={showSeasonHover}
                         onLeave={hideSeasonHover}
                       />
@@ -682,11 +697,25 @@ export default function PlayerDetailPage() {
 }
 
 function SeasonAccoladesCard({ hover }: { hover: SeasonHover }) {
+  const [pos, setPos] = useState(() => positionBelowAnchor(hover.anchor));
+
+  useEffect(() => {
+    const update = () => setPos(positionBelowAnchor(hover.anchor));
+    update();
+    // capture:true catches scroll on overflow-x-auto ancestors, not just the window.
+    window.addEventListener("scroll", update, true);
+    window.addEventListener("resize", update);
+    return () => {
+      window.removeEventListener("scroll", update, true);
+      window.removeEventListener("resize", update);
+    };
+  }, [hover.anchor]);
+
   return (
     // Fixed so the card escapes the table's horizontal scroll container instead of being clipped.
     <div
-      className="pointer-events-none fixed z-50 -translate-y-1/2 rounded-xl border border-black/10 bg-white px-3 py-2 shadow-lg dark:border-white/10 dark:bg-zinc-900"
-      style={{ left: hover.x, top: hover.y, width: HOVER_WIDTH_PX }}
+      className="pointer-events-none fixed z-50 rounded-xl border border-black/10 bg-white px-3 py-2 shadow-lg dark:border-white/10 dark:bg-zinc-900"
+      style={{ left: pos.left, top: pos.top, width: HOVER_WIDTH_PX }}
     >
       <div className="text-[11px] uppercase tracking-wide text-zinc-500">{hover.title}</div>
       <ul className="mt-1 grid gap-1 text-xs text-zinc-700 dark:text-zinc-200">
@@ -709,13 +738,61 @@ function seasonRowClass(hasAccolades: boolean): string {
   return hasAccolades ? `${base} hover:bg-amber-500/10 dark:hover:bg-amber-500/10` : base;
 }
 
-function SeasonCellLabel({ row, hasAccolades }: { row: PlayerSeasonStat; hasAccolades: boolean }) {
+function TrophyIcon() {
   return (
-    <span className="inline-flex items-center gap-1.5">
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400"
+      aria-hidden
+    >
+      <path d="M7 4h10v5a5 5 0 0 1-10 0V4Z" />
+      <path d="M7 5H4.5v1.5A3.5 3.5 0 0 0 8 10" />
+      <path d="M17 5h2.5v1.5A3.5 3.5 0 0 1 16 10" />
+      <path d="M12 14v3.5" />
+      <path d="M8.5 20h7" />
+    </svg>
+  );
+}
+
+function AwardBadge({ label, title }: { label: string; title: string }) {
+  return (
+    <span
+      title={title}
+      className="rounded bg-amber-500/15 px-1 py-px text-[9px] font-bold leading-tight tracking-wide text-amber-700 dark:text-amber-300"
+    >
+      {label}
+    </span>
+  );
+}
+
+function SeasonCellLabel({
+  row,
+  slugs,
+  scope,
+}: {
+  row: PlayerSeasonStat;
+  slugs: Set<string> | undefined;
+  scope: SeasonScope;
+}) {
+  const showChampion = scope === "postseason" && slugs?.has("championship");
+  const showFinalsMvp = scope === "postseason" && slugs?.has("finals_mvp");
+  const showMvp = scope === "regular" && slugs?.has("mvp");
+
+  return (
+    <span className="inline-flex items-center gap-1">
       {row.season?.label || row.season?.start_year || "—"}
-      {hasAccolades ? (
-        <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden />
+      {showChampion ? (
+        <span title="NBA Champion" className="inline-flex">
+          <TrophyIcon />
+        </span>
       ) : null}
+      {showFinalsMvp ? <AwardBadge label="FMVP" title="Finals MVP" /> : null}
+      {showMvp ? <AwardBadge label="MVP" title="Most Valuable Player" /> : null}
     </span>
   );
 }
@@ -817,20 +894,23 @@ function CountingSeasonRow({
   row,
   teamLabel,
   view,
-  accolades,
+  seasonAwards,
+  scope,
   onHover,
   onLeave,
 }: {
   row: PlayerSeasonStat;
   teamLabel: string;
   view: StatsView;
-  accolades: string[];
+  seasonAwards: SeasonAwards | undefined;
+  scope: SeasonScope;
   onHover: SeasonHoverHandler;
   onLeave: () => void;
 }) {
   const g = row.games;
   const counting = (n: number | null | undefined, digits = 1) =>
     view === "per_game" ? perGame(n, g, digits) : fmt(n);
+  const accolades = seasonAwards?.labels ?? [];
 
   return (
     <tr
@@ -839,7 +919,7 @@ function CountingSeasonRow({
       onMouseLeave={accolades.length > 0 ? onLeave : undefined}
     >
       <td className="whitespace-nowrap px-2 py-2 first:pl-4">
-        <SeasonCellLabel row={row} hasAccolades={accolades.length > 0} />
+        <SeasonCellLabel row={row} slugs={seasonAwards?.slugs} scope={scope} />
       </td>
       <td className="whitespace-nowrap px-2 py-2">{teamLabel}</td>
       <td className="px-2 py-2 tabular-nums">{fmt(row.games)}</td>
@@ -902,16 +982,20 @@ function CountingCareerRow({
 function AdvancedSeasonRow({
   row,
   teamLabel,
-  accolades,
+  seasonAwards,
+  scope,
   onHover,
   onLeave,
 }: {
   row: PlayerSeasonStat;
   teamLabel: string;
-  accolades: string[];
+  seasonAwards: SeasonAwards | undefined;
+  scope: SeasonScope;
   onHover: SeasonHoverHandler;
   onLeave: () => void;
 }) {
+  const accolades = seasonAwards?.labels ?? [];
+
   return (
     <tr
       className={seasonRowClass(accolades.length > 0)}
@@ -919,7 +1003,7 @@ function AdvancedSeasonRow({
       onMouseLeave={accolades.length > 0 ? onLeave : undefined}
     >
       <td className="whitespace-nowrap px-2 py-2 first:pl-4">
-        <SeasonCellLabel row={row} hasAccolades={accolades.length > 0} />
+        <SeasonCellLabel row={row} slugs={seasonAwards?.slugs} scope={scope} />
       </td>
       <td className="whitespace-nowrap px-2 py-2">{teamLabel}</td>
       <td className="px-2 py-2 tabular-nums">{fmt(row.games)}</td>
