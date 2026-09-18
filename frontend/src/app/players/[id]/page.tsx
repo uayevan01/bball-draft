@@ -712,7 +712,7 @@ export default function PlayerDetailPage() {
   }
 
   return (
-    <AppShell wide>
+    <AppShell>
       <div className="mb-4">
         <Link href="/players" className="text-sm text-zinc-600 hover:underline dark:text-zinc-400">
           ← Player database

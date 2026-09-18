@@ -9,7 +9,7 @@ export default async function DraftLobbyPage({ params }: Props) {
   const { id } = await params;
 
   return (
-    <AppShell wide>
+    <AppShell>
       <DraftLobbyClient draftRef={id} />
     </AppShell>
   );

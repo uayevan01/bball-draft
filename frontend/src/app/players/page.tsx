@@ -465,7 +465,7 @@ export default function PlayersPage() {
   }
 
   return (
-    <AppShell wide>
+    <AppShell>
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h2 className="text-2xl font-semibold tracking-tight">Player database</h2>
