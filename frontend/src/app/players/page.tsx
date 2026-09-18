@@ -99,7 +99,7 @@ function formatCareerStat(
 }
 
 function formatCount(n: number | null | undefined): string {
-  if (n == null || n <= 0) return "—";
+  if (n == null || Number.isNaN(n)) return "—";
   return String(n);
 }
 
