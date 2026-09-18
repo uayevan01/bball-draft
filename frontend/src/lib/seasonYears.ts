@@ -34,17 +34,29 @@ export function formatCareerYears(
   return String(retirementYear);
 }
 
-/** Draft class year (NBA draft calendar year). */
+function ordinalSuffixOf(i: number): string {
+  const j = i % 10;
+  const k = i % 100;
+  if (j === 1 && k !== 11) return `${i}st`;
+  if (j === 2 && k !== 12) return `${i}nd`;
+  if (j === 3 && k !== 13) return `${i}rd`;
+  return `${i}th`;
+}
+
+/** Draft class year and overall pick; Undrafted when no draft record is on file. */
 export function formatDraftYear(
   draftYear: number | null | undefined,
   draftRound?: number | null,
   draftPick?: number | null,
 ): string {
-  if (draftYear == null) return "—";
-  let out = String(draftYear);
-  if (draftRound != null) out += ` · R${draftRound}`;
-  if (draftPick != null) out += ` · Pick ${draftPick}`;
-  return out;
+  if (draftPick != null && draftYear != null) {
+    let out = `${draftYear} · ${ordinalSuffixOf(draftPick)} Overall Pick`;
+    if (draftRound != null) out = `${draftYear} · R${draftRound} · Pick ${draftPick}`;
+    return out;
+  }
+  if (draftPick != null) return `Pick ${draftPick}`;
+  if (draftYear != null) return String(draftYear);
+  return "Undrafted";
 }
 
 /** Stint span: first season start year → last season end year (as stored). */

@@ -312,6 +312,12 @@ def _chunk(seq: Sequence, n: int) -> list[Sequence]:
 
 
 async def upsert_players_from_drafts(start_year: int, end_year: int) -> int:
+    """
+    Scrape NBA draft tables and merge draft_year / round / pick / drafted team onto players.
+
+    Matches by bref_id from the player link on the draft page (not name+year), so this
+    updates the same rows created by --all-players instead of creating orphans.
+    """
     draft_rows = await scrape_drafts(start_year, end_year)
     if not draft_rows:
         return 0
@@ -319,9 +325,25 @@ async def upsert_players_from_drafts(start_year: int, end_year: int) -> int:
     async with SessionLocal() as session:
         abbr_to_team_id = await _team_abbr_map(session)
 
-        values = []
-        it = tqdm(draft_rows, total=len(draft_rows), desc="Draft rows", unit="row", dynamic_ncols=True) if tqdm else draft_rows
+        # Career-start was previously used as a stand-in draft year. Clear those so
+        # anyone not present in the draft tables correctly shows as Undrafted.
+        await session.execute(
+            update(Player)
+            .where(Player.draft_pick.is_(None))
+            .values(draft_year=None, draft_round=None)
+        )
+
+        values: list[dict] = []
+        skipped_no_bref = 0
+        it = (
+            tqdm(draft_rows, total=len(draft_rows), desc="Draft rows", unit="row", dynamic_ncols=True)
+            if tqdm
+            else draft_rows
+        )
         for r in it:
+            if not r.bref_id:
+                skipped_no_bref += 1
+                continue
             team_id = None
             if r.team_abbreviation:
                 abbr = ABBR_ALIASES.get(r.team_abbreviation.upper(), r.team_abbreviation.upper())
@@ -329,6 +351,7 @@ async def upsert_players_from_drafts(start_year: int, end_year: int) -> int:
 
             values.append(
                 {
+                    "bref_id": r.bref_id,
                     "name": r.name,
                     "draft_year": r.draft_year,
                     "draft_round": r.draft_round,
@@ -338,22 +361,32 @@ async def upsert_players_from_drafts(start_year: int, end_year: int) -> int:
                 }
             )
 
-        # Upsert in chunks to keep statements manageable.
+        # One player can appear once per draft; if a bref_id somehow repeats, last wins.
+        by_bref: dict[str, dict] = {}
+        for row in values:
+            by_bref[row["bref_id"]] = row
+        values = list(by_bref.values())
+
         total = 0
         for batch in _chunk(values, 2000):
             stmt = insert(Player).values(batch)
             stmt = stmt.on_conflict_do_update(
-                constraint="uq_players_name_year_pick",
+                constraint="uq_players_bref_id",
                 set_={
+                    "draft_year": stmt.excluded.draft_year,
                     "draft_round": stmt.excluded.draft_round,
+                    "draft_pick": stmt.excluded.draft_pick,
                     "team_id": stmt.excluded.team_id,
-                    "position": stmt.excluded.position,
+                    # Keep existing position when the draft table omits it.
+                    "position": func.coalesce(stmt.excluded.position, Player.position),
                 },
             )
             await session.execute(stmt)
             total += len(batch)
 
         await session.commit()
+        if skipped_no_bref:
+            print(f"[drafts] skipped {skipped_no_bref} rows with no player bref_id link")
         return total
 
 
@@ -365,7 +398,7 @@ async def upsert_all_players_from_index(concurrency: int = 4) -> int:
     - `position` is stored if present.
     - BRef index From/To columns use season **end** years (e.g. 2004 = 2003-04).
       We convert to season **start** years for career_start_year / retirement_year.
-    - Does not overwrite an existing real `draft_year` from draft-table scrapes.
+    - Does not set draft_year (use --drafts for real draft info; null = Undrafted).
     """
     rows = await scrape_all_players_index(concurrency=concurrency)
     if not rows:
@@ -385,8 +418,6 @@ async def upsert_all_players_from_index(concurrency: int = 4) -> int:
                 "bref_id": r.bref_id,
                 "name": r.name,
                 "position": r.position,
-                # Best-effort only for undrafted / unknown; real draft year comes from --drafts.
-                "draft_year": career_start_year,
                 "career_start_year": career_start_year,
                 "retirement_year": retirement_year,
                 "hall_of_fame": bool(getattr(r, "hall_of_fame", False)),
@@ -402,8 +433,6 @@ async def upsert_all_players_from_index(concurrency: int = 4) -> int:
                 set_={
                     "name": stmt.excluded.name,
                     "position": stmt.excluded.position,
-                    # Preserve draft_year when already set (e.g. from draft pages).
-                    "draft_year": func.coalesce(Player.draft_year, stmt.excluded.draft_year),
                     "career_start_year": stmt.excluded.career_start_year,
                     "retirement_year": stmt.excluded.retirement_year,
                     "hall_of_fame": stmt.excluded.hall_of_fame,
@@ -857,7 +886,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Seed Teams/Players from Basketball Reference.")
     parser.add_argument("--teams", action="store_true", help="Scrape and upsert Teams")
     parser.add_argument("--team-logos", action="store_true", help="Also scrape and store team logo_url (slower)")
-    parser.add_argument("--drafts", nargs=2, type=int, metavar=("START_YEAR", "END_YEAR"), help="Scrape drafts and upsert Players")
+    parser.add_argument(
+        "--drafts",
+        nargs=2,
+        type=int,
+        metavar=("START_YEAR", "END_YEAR"),
+        help="Scrape draft tables and merge year/round/pick onto players by bref_id",
+    )
     parser.add_argument("--all-players", action="store_true", help="Scrape ALL players A–Z (drafted + undrafted) and upsert by bref_id")
     parser.add_argument("--player-stints", action="store_true", help="Scrape player pages and populate player_team_stints")
     parser.add_argument("--player-stats", action="store_true", help="Scrape player pages and upsert player_season_stats")

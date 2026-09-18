@@ -53,6 +53,7 @@ class BRefDraftRow:
     draft_pick: int | None
     team_abbreviation: str | None
     position: str | None
+    bref_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1140,9 +1141,11 @@ async def scrape_draft_year(draft_year: int) -> list[BRefDraftRow]:
         name = _clean(player_cell.get_text())
         if not name:
             continue
+        player_link = player_cell.select_one("a")
+        bref_id = _parse_bref_player_id_from_href(player_link.get("href") if player_link else None)
 
-        rnd_cell = tr.select_one('td[data-stat="draft_round"]')
-        pk_cell = tr.select_one('td[data-stat="pick_overall"]')
+        rnd_cell = tr.select_one('td[data-stat="draft_round"]') or tr.select_one('td[data-stat="round"]')
+        pk_cell = tr.select_one('td[data-stat="pick_overall"]') or tr.select_one('td[data-stat="pick"]')
 
         rnd = _parse_int(_clean(rnd_cell.get_text() if rnd_cell else None))
         pk = _parse_int(_clean(pk_cell.get_text() if pk_cell else None))
@@ -1161,6 +1164,7 @@ async def scrape_draft_year(draft_year: int) -> list[BRefDraftRow]:
                 draft_pick=pk,
                 team_abbreviation=team_abbr,
                 position=pos,
+                bref_id=bref_id,
             )
         )
 
@@ -1177,7 +1181,10 @@ async def scrape_drafts(start_year: int, end_year: int) -> list[BRefDraftRow]:
     years = list(range(start_year, end_year + 1))
     it = tqdm(years, desc="Draft years", unit="year", dynamic_ncols=True) if tqdm else years
     for year in it:
-        rows.extend(await scrape_draft_year(int(year)))
+        try:
+            rows.extend(await scrape_draft_year(int(year)))
+        except Exception as exc:  # noqa: BLE001 — one bad year shouldn't abort the whole range
+            print(f"[drafts] skip {year}: {exc}")
     return rows
 
 
