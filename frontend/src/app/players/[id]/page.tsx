@@ -1130,6 +1130,39 @@ function SortableTh({
 
 function AwardChip({ group }: { group: AwardGroup }) {
   const [open, setOpen] = useState(false);
+  const chipRef = useRef<HTMLSpanElement>(null);
+  const menuRef = useRef<HTMLSpanElement>(null);
+  const [pos, setPos] = useState({ left: 0, top: 0, maxHeight: 256 });
+
+  useEffect(() => {
+    if (!open) return;
+
+    function update(e?: Event) {
+      const target = e?.target;
+      if (target instanceof Node && menuRef.current?.contains(target)) return;
+      const el = chipRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const viewportPad = 12;
+      const spaceBelow = window.innerHeight - r.bottom - viewportPad;
+      const spaceAbove = r.top - viewportPad;
+      const openUp = spaceBelow < 160 && spaceAbove > spaceBelow;
+      const maxHeight = Math.max(120, Math.min(384, openUp ? spaceAbove : spaceBelow));
+      setPos({
+        left: Math.min(r.left, Math.max(viewportPad, window.innerWidth - 180)),
+        top: openUp ? r.top - maxHeight : r.bottom,
+        maxHeight,
+      });
+    }
+
+    update();
+    window.addEventListener("scroll", update, true);
+    window.addEventListener("resize", update);
+    return () => {
+      window.removeEventListener("scroll", update, true);
+      window.removeEventListener("resize", update);
+    };
+  }, [open]);
 
   return (
     <span
@@ -1137,22 +1170,27 @@ function AwardChip({ group }: { group: AwardGroup }) {
       onMouseEnter={() => setOpen(true)}
       onMouseLeave={() => setOpen(false)}
     >
-      <span className="inline-flex cursor-default items-baseline gap-1 rounded-full border border-black/10 px-3 py-1 dark:border-white/10">
+      <span
+        ref={chipRef}
+        className="inline-flex cursor-default items-baseline gap-1 rounded-full border border-black/10 px-3 py-1 dark:border-white/10"
+      >
         <span className="font-semibold tabular-nums">{group.count}x</span>
         <span className="text-[11px] uppercase tracking-wide text-zinc-500">{group.name}</span>
       </span>
       {open && group.entries.length > 0 ? (
-        // pt-1 keeps a hover bridge across the gap so the menu stays open while moving onto it.
-        <span className="absolute left-0 top-full z-20 pt-1">
-          <span className="block max-h-64 min-w-40 overflow-y-auto overscroll-contain rounded-xl border border-black/10 bg-white px-3 py-2 text-xs text-zinc-700 shadow-lg dark:border-white/10 dark:bg-zinc-900 dark:text-zinc-200">
-            <ul className="grid gap-1">
-              {group.entries.map((e) => (
-                <li key={e.id} className="whitespace-nowrap tabular-nums">
-                  {e.teamLabel} {e.year}
-                </li>
-              ))}
-            </ul>
-          </span>
+        <span
+          ref={menuRef}
+          className="fixed z-50 block min-w-40 overflow-y-auto overscroll-contain rounded-xl border border-black/10 bg-white px-3 py-2 text-xs text-zinc-700 shadow-lg dark:border-white/10 dark:bg-zinc-900 dark:text-zinc-200"
+          style={{ left: pos.left, top: pos.top, maxHeight: pos.maxHeight }}
+          onWheel={(e) => e.stopPropagation()}
+        >
+          <ul className="grid gap-1">
+            {group.entries.map((e) => (
+              <li key={e.id} className="whitespace-nowrap tabular-nums">
+                {e.teamLabel} {e.year}
+              </li>
+            ))}
+          </ul>
         </span>
       ) : null}
     </span>
