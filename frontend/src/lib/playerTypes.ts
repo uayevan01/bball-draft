@@ -25,6 +25,8 @@ export type PlayerAwardCounts = {
   all_nba_2?: number;
   all_nba_3?: number;
   all_defense?: number;
+  all_defense_1?: number;
+  all_defense_2?: number;
   mvp?: number;
   championship?: number;
   finals_mvp?: number;

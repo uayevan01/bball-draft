@@ -18,8 +18,10 @@ const POSITION_OPTIONS = ["G", "F", "C", "G-F", "F-C", "F-G", "C-F"] as const;
 type StatKey = "pts" | "trb" | "ast" | "stl" | "blk";
 type StatMode = "totals" | "per_game";
 type StatBounds = Record<StatKey, { min: string; max: string }>;
+type AccoladeCountKey = "all_nba" | "all_star" | "all_def" | "mvp" | "rings" | "fmvp";
+type AccoladeBounds = Record<AccoladeCountKey, { min: string; max: string }>;
 type SortDir = "asc" | "desc";
-type SortKey = "name" | "position" | "team" | "years" | StatKey | "hof" | "all_nba" | "all_star" | "all_def" | "mvp" | "rings" | "fmvp";
+type SortKey = "name" | "position" | "team" | "years" | StatKey | "hof" | AccoladeCountKey;
 
 const DEFAULT_SORT_KEY: SortKey = "name";
 const DEFAULT_SORT_DIR: SortDir = "asc";
@@ -43,6 +45,30 @@ const EMPTY_STAT_BOUNDS: StatBounds = {
   ast: { min: "", max: "" },
   stl: { min: "", max: "" },
   blk: { min: "", max: "" },
+};
+
+const ACCOLADE_COUNT_FIELDS: Array<{
+  key: AccoladeCountKey;
+  label: string;
+  short: string;
+  minParam: string;
+  maxParam: string;
+}> = [
+  { key: "all_nba", label: "All-NBA", short: "All-NBA", minParam: "min_all_nba", maxParam: "max_all_nba" },
+  { key: "all_star", label: "All-Star", short: "AS", minParam: "min_all_star", maxParam: "max_all_star" },
+  { key: "all_def", label: "All-Defensive", short: "All-Def", minParam: "min_all_defense", maxParam: "max_all_defense" },
+  { key: "mvp", label: "MVP", short: "MVP", minParam: "min_mvp", maxParam: "max_mvp" },
+  { key: "rings", label: "Championships", short: "Titles", minParam: "min_championship", maxParam: "max_championship" },
+  { key: "fmvp", label: "Finals MVPs", short: "FMVP", minParam: "min_finals_mvp", maxParam: "max_finals_mvp" },
+];
+
+const EMPTY_ACCOLADE_BOUNDS: AccoladeBounds = {
+  all_nba: { min: "", max: "" },
+  all_star: { min: "", max: "" },
+  all_def: { min: "", max: "" },
+  mvp: { min: "", max: "" },
+  rings: { min: "", max: "" },
+  fmvp: { min: "", max: "" },
 };
 
 function parseOptionalInt(raw: string): number | undefined {
@@ -87,6 +113,14 @@ function allNbaCount(counts: PlayerAwardCounts | null | undefined, teams: { firs
     );
   }
   return counts.all_nba ?? 0;
+}
+
+function allDefCount(counts: PlayerAwardCounts | null | undefined, teams: { first: boolean; second: boolean }): number {
+  if (!counts) return 0;
+  if (teams.first || teams.second) {
+    return (teams.first ? counts.all_defense_1 ?? 0 : 0) + (teams.second ? counts.all_defense_2 ?? 0 : 0);
+  }
+  return counts.all_defense ?? 0;
 }
 
 function FilterDisclosure({
@@ -151,6 +185,73 @@ function CheckLabel({
   );
 }
 
+function AccoladeBoundRows({
+  field,
+  bounds,
+  inputClass,
+  onBoundChange,
+  allNba,
+  allDef,
+  onAllNbaChange,
+  onAllDefChange,
+}: {
+  field: (typeof ACCOLADE_COUNT_FIELDS)[number];
+  bounds: { min: string; max: string };
+  inputClass: string;
+  onBoundChange: (side: "min" | "max", value: string) => void;
+  allNba: { first: boolean; second: boolean; third: boolean };
+  allDef: { first: boolean; second: boolean };
+  onAllNbaChange: { first: (v: boolean) => void; second: (v: boolean) => void; third: (v: boolean) => void };
+  onAllDefChange: { first: (v: boolean) => void; second: (v: boolean) => void };
+}) {
+  return (
+    <>
+      <tr>
+        <td className="py-1.5 pr-3 font-medium text-zinc-700 dark:text-zinc-200">{field.label}</td>
+        <td className="py-1.5 pr-3">
+          <input
+            className={inputClass}
+            inputMode="numeric"
+            value={bounds.min}
+            onChange={(e) => onBoundChange("min", e.target.value)}
+            placeholder="no min"
+          />
+        </td>
+        <td className="py-1.5">
+          <input
+            className={inputClass}
+            inputMode="numeric"
+            value={bounds.max}
+            onChange={(e) => onBoundChange("max", e.target.value)}
+            placeholder="no max"
+          />
+        </td>
+      </tr>
+      {field.key === "all_nba" ? (
+        <tr>
+          <td colSpan={3} className="pb-3">
+            <div className="flex flex-wrap gap-x-4 gap-y-2">
+              <CheckLabel label="First team" checked={allNba.first} onChange={onAllNbaChange.first} />
+              <CheckLabel label="Second team" checked={allNba.second} onChange={onAllNbaChange.second} />
+              <CheckLabel label="Third team" checked={allNba.third} onChange={onAllNbaChange.third} />
+            </div>
+          </td>
+        </tr>
+      ) : null}
+      {field.key === "all_def" ? (
+        <tr>
+          <td colSpan={3} className="pb-3">
+            <div className="flex flex-wrap gap-x-4 gap-y-2">
+              <CheckLabel label="First team" checked={allDef.first} onChange={onAllDefChange.first} />
+              <CheckLabel label="Second team" checked={allDef.second} onChange={onAllDefChange.second} />
+            </div>
+          </td>
+        </tr>
+      ) : null}
+    </>
+  );
+}
+
 function SortableTh({
   label,
   sortKey,
@@ -203,17 +304,14 @@ export default function PlayersPage() {
 
   const [statMode, setStatMode] = useState<StatMode>("totals");
   const [statBounds, setStatBounds] = useState<StatBounds>(EMPTY_STAT_BOUNDS);
+  const [accoladeBounds, setAccoladeBounds] = useState<AccoladeBounds>(EMPTY_ACCOLADE_BOUNDS);
 
   const [hallOfFame, setHallOfFame] = useState(false);
-  const [allNba, setAllNba] = useState(false);
   const [allNba1, setAllNba1] = useState(false);
   const [allNba2, setAllNba2] = useState(false);
   const [allNba3, setAllNba3] = useState(false);
-  const [allStar, setAllStar] = useState(false);
-  const [allDefense, setAllDefense] = useState(false);
-  const [mvp, setMvp] = useState(false);
-  const [championship, setChampionship] = useState(false);
-  const [finalsMvp, setFinalsMvp] = useState(false);
+  const [allDef1, setAllDef1] = useState(false);
+  const [allDef2, setAllDef2] = useState(false);
 
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [accoladesOpen, setAccoladesOpen] = useState(false);
@@ -224,6 +322,7 @@ export default function PlayersPage() {
   const debouncedActiveFrom = useDebouncedValue(activeFrom);
   const debouncedActiveTo = useDebouncedValue(activeTo);
   const debouncedStatBounds = useDebouncedValue(statBounds);
+  const debouncedAccoladeBounds = useDebouncedValue(accoladeBounds);
 
   const activeStatKeys = useMemo(() => {
     return STAT_FIELDS.filter(({ key }) => {
@@ -232,16 +331,15 @@ export default function PlayersPage() {
     }).map((f) => f.key);
   }, [debouncedStatBounds]);
 
+  const activeAccoladeKeys = useMemo(() => {
+    return ACCOLADE_COUNT_FIELDS.filter(({ key }) => {
+      const b = debouncedAccoladeBounds[key];
+      return Boolean(b.min.trim() || b.max.trim());
+    }).map((f) => f.key);
+  }, [debouncedAccoladeBounds]);
+
   const advancedCount = activeStatKeys.length;
-  const accoladeCount = [
-    hallOfFame,
-    allNba,
-    allStar,
-    allDefense,
-    mvp,
-    championship,
-    finalsMvp,
-  ].filter(Boolean).length;
+  const accoladeCount = (hallOfFame ? 1 : 0) + activeAccoladeKeys.length;
 
   useEffect(() => {
     if (advancedCount > 0) setAdvancedOpen(true);
@@ -261,16 +359,13 @@ export default function PlayersPage() {
     debouncedActiveTo,
     statMode,
     debouncedStatBounds,
+    debouncedAccoladeBounds,
     hallOfFame,
-    allNba,
     allNba1,
     allNba2,
     allNba3,
-    allStar,
-    allDefense,
-    mvp,
-    championship,
-    finalsMvp,
+    allDef1,
+    allDef2,
     sortBy,
     sortDir,
   ]);
@@ -316,18 +411,24 @@ export default function PlayersPage() {
     }
 
     if (hallOfFame) params.set("hall_of_fame", "true");
-    if (allStar) params.set("all_star", "true");
-    if (allNba1 || allNba2 || allNba3) {
+    const allNbaActive = activeAccoladeKeys.includes("all_nba");
+    const allDefActive = activeAccoladeKeys.includes("all_def");
+    for (const field of ACCOLADE_COUNT_FIELDS) {
+      if (!activeAccoladeKeys.includes(field.key)) continue;
+      const minN = parseOptionalNumber(debouncedAccoladeBounds[field.key].min);
+      const maxN = parseOptionalNumber(debouncedAccoladeBounds[field.key].max);
+      if (minN !== undefined) params.set(field.minParam, String(Math.trunc(minN)));
+      if (maxN !== undefined) params.set(field.maxParam, String(Math.trunc(maxN)));
+    }
+    if (allNbaActive) {
       if (allNba1) params.set("all_nba_1", "true");
       if (allNba2) params.set("all_nba_2", "true");
       if (allNba3) params.set("all_nba_3", "true");
-    } else if (allNba) {
-      params.set("all_nba", "true");
     }
-    if (allDefense) params.set("all_defense", "true");
-    if (mvp) params.set("mvp", "true");
-    if (championship) params.set("championship", "true");
-    if (finalsMvp) params.set("finals_mvp", "true");
+    if (allDefActive) {
+      if (allDef1) params.set("all_defense_1", "true");
+      if (allDef2) params.set("all_defense_2", "true");
+    }
     if (accoladeCount > 0) params.set("include_award_counts", "true");
     params.set("sort_by", sortBy);
     params.set("sort_dir", sortDir);
@@ -342,16 +443,14 @@ export default function PlayersPage() {
     statMode,
     debouncedStatBounds,
     activeStatKeys,
+    debouncedAccoladeBounds,
+    activeAccoladeKeys,
     hallOfFame,
-    allNba,
     allNba1,
     allNba2,
     allNba3,
-    allStar,
-    allDefense,
-    mvp,
-    championship,
-    finalsMvp,
+    allDef1,
+    allDef2,
     accoladeCount,
     sortBy,
     sortDir,
@@ -406,30 +505,34 @@ export default function PlayersPage() {
     if (hallOfFame) {
       cols.push({ key: "hof", label: "HOF", render: (p) => (p.hall_of_fame ? "Yes" : "—") });
     }
-    if (allNba) {
+    if (activeAccoladeKeys.includes("all_nba")) {
       cols.push({
         key: "all_nba",
         label: "All-NBA",
         render: (p) => formatCount(allNbaCount(p.award_counts, { first: allNba1, second: allNba2, third: allNba3 })),
       });
     }
-    if (allStar) {
+    if (activeAccoladeKeys.includes("all_star")) {
       cols.push({ key: "all_star", label: "AS", render: (p) => formatCount(p.award_counts?.all_star) });
     }
-    if (allDefense) {
-      cols.push({ key: "all_def", label: "All-Def", render: (p) => formatCount(p.award_counts?.all_defense) });
+    if (activeAccoladeKeys.includes("all_def")) {
+      cols.push({
+        key: "all_def",
+        label: "All-Def",
+        render: (p) => formatCount(allDefCount(p.award_counts, { first: allDef1, second: allDef2 })),
+      });
     }
-    if (mvp) {
+    if (activeAccoladeKeys.includes("mvp")) {
       cols.push({ key: "mvp", label: "MVP", render: (p) => formatCount(p.award_counts?.mvp) });
     }
-    if (championship) {
+    if (activeAccoladeKeys.includes("rings")) {
       cols.push({ key: "rings", label: "Titles", render: (p) => formatCount(p.award_counts?.championship) });
     }
-    if (finalsMvp) {
+    if (activeAccoladeKeys.includes("fmvp")) {
       cols.push({ key: "fmvp", label: "FMVP", render: (p) => formatCount(p.award_counts?.finals_mvp) });
     }
     return cols;
-  }, [activeStatKeys, statMode, hallOfFame, allNba, allNba1, allNba2, allNba3, allStar, allDefense, mvp, championship, finalsMvp]);
+  }, [activeStatKeys, statMode, hallOfFame, activeAccoladeKeys, allNba1, allNba2, allNba3, allDef1, allDef2]);
 
   useEffect(() => {
     const visible = new Set<SortKey>(["name", "position", "team", "years", ...extraColumns.map((c) => c.key)]);
@@ -446,6 +549,10 @@ export default function PlayersPage() {
 
   function setStatBound(key: StatKey, side: "min" | "max", value: string) {
     setStatBounds((prev) => ({ ...prev, [key]: { ...prev[key], [side]: value } }));
+  }
+
+  function setAccoladeBound(key: AccoladeCountKey, side: "min" | "max", value: string) {
+    setAccoladeBounds((prev) => ({ ...prev, [key]: { ...prev[key], [side]: value } }));
   }
 
   function onSort(key: SortKey) {
@@ -619,54 +726,38 @@ export default function PlayersPage() {
           onToggle={() => setAccoladesOpen((v) => !v)}
           badge={accoladeCount || undefined}
         >
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            Filter by career award counts. Columns appear only for accolades you set. For All-NBA and All-Defensive,
+            choose which teams count toward min/max; leave them unchecked to include every team.
+          </p>
+          <div className="mt-3">
             <CheckLabel label="Hall of Fame" checked={hallOfFame} onChange={setHallOfFame} />
-            <div className="grid gap-2">
-              <CheckLabel
-                label="All-NBA"
-                checked={allNba}
-                onChange={(on) => {
-                  setAllNba(on);
-                  if (!on) {
-                    setAllNba1(false);
-                    setAllNba2(false);
-                    setAllNba3(false);
-                  }
-                }}
-              />
-              <CheckLabel
-                label="First team"
-                checked={allNba1}
-                indent
-                onChange={(on) => {
-                  setAllNba1(on);
-                  if (on) setAllNba(true);
-                }}
-              />
-              <CheckLabel
-                label="Second team"
-                checked={allNba2}
-                indent
-                onChange={(on) => {
-                  setAllNba2(on);
-                  if (on) setAllNba(true);
-                }}
-              />
-              <CheckLabel
-                label="Third team"
-                checked={allNba3}
-                indent
-                onChange={(on) => {
-                  setAllNba3(on);
-                  if (on) setAllNba(true);
-                }}
-              />
-            </div>
-            <CheckLabel label="All-Star" checked={allStar} onChange={setAllStar} />
-            <CheckLabel label="All-Defensive" checked={allDefense} onChange={setAllDefense} />
-            <CheckLabel label="MVP" checked={mvp} onChange={setMvp} />
-            <CheckLabel label="Championships" checked={championship} onChange={setChampionship} />
-            <CheckLabel label="Finals MVPs" checked={finalsMvp} onChange={setFinalsMvp} />
+          </div>
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full min-w-0 text-left text-sm">
+              <thead className="text-xs uppercase tracking-wide text-zinc-500">
+                <tr>
+                  <th className="py-1 pr-3 font-medium">Accolade</th>
+                  <th className="py-1 pr-3 font-medium">Min</th>
+                  <th className="py-1 font-medium">Max</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ACCOLADE_COUNT_FIELDS.map((field) => (
+                  <AccoladeBoundRows
+                    key={field.key}
+                    field={field}
+                    bounds={accoladeBounds[field.key]}
+                    inputClass={inputClass}
+                    onBoundChange={(side, value) => setAccoladeBound(field.key, side, value)}
+                    allNba={{ first: allNba1, second: allNba2, third: allNba3 }}
+                    allDef={{ first: allDef1, second: allDef2 }}
+                    onAllNbaChange={{ first: setAllNba1, second: setAllNba2, third: setAllNba3 }}
+                    onAllDefChange={{ first: setAllDef1, second: setAllDef2 }}
+                  />
+                ))}
+              </tbody>
+            </table>
           </div>
         </FilterDisclosure>
       </div>

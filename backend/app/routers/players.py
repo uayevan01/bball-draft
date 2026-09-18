@@ -303,12 +303,39 @@ def _directed(expr, sort_dir: str):
     return ordered.nulls_last()
 
 
+def _selected_award_slugs(
+    flags_and_slugs: tuple[tuple[bool | None, str], ...],
+    default: tuple[str, ...],
+) -> list[str]:
+    selected = [slug for flag, slug in flags_and_slugs if flag]
+    return selected or list(default)
+
+
+def _apply_award_count_bounds(stmt, *, slugs: list[str], min_v: int | None, max_v: int | None, label: str, legacy: bool | None):
+    if min_v is not None and max_v is not None and min_v > max_v:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"min_{label} cannot exceed max_{label}",
+        )
+    if min_v is None and max_v is None:
+        if legacy:
+            return stmt.where(_has_awards(*slugs))
+        return stmt
+    expr = _award_count_sort_expr(*slugs)
+    if min_v is not None:
+        stmt = stmt.where(expr >= min_v)
+    if max_v is not None:
+        stmt = stmt.where(expr <= max_v)
+    return stmt
+
+
 def _player_list_order_by(
     *,
     sort_by: str,
     sort_dir: str,
     stat_mode: str,
     all_nba_slugs: list[str],
+    all_def_slugs: list[str],
 ):
     per_game = stat_mode == "per_game"
     if sort_by in _STAT_SORT_COLS:
@@ -329,7 +356,8 @@ def _player_list_order_by(
     elif sort_by == "all_star":
         primary = _directed(_award_count_sort_expr("all_star"), sort_dir)
     elif sort_by == "all_def":
-        primary = _directed(_award_count_sort_expr("all_defense_1", "all_defense_2"), sort_dir)
+        slugs = all_def_slugs or ["all_defense_1", "all_defense_2"]
+        primary = _directed(_award_count_sort_expr(*slugs), sort_dir)
     elif sort_by == "mvp":
         primary = _directed(_award_count_sort_expr("mvp"), sort_dir)
     elif sort_by == "rings":
@@ -434,6 +462,8 @@ async def _hydrate_player_list(
                 all_nba_2=a2,
                 all_nba_3=a3,
                 all_defense=d1 + d2,
+                all_defense_1=d1,
+                all_defense_2=d2,
                 mvp=counts.get("mvp", 0),
                 championship=counts.get("championship", 0),
                 finals_mvp=counts.get("finals_mvp", 0),
@@ -517,15 +547,29 @@ async def list_players(
     min_games: int | None = Query(default=None, ge=0, description="Minimum career games played"),
     max_games: int | None = Query(default=None, ge=0, description="Maximum career games played"),
     hall_of_fame: bool | None = Query(default=None, description="If true, only Hall of Fame players"),
-    all_star: bool | None = Query(default=None, description="If true, require at least one All-Star selection"),
-    all_nba: bool | None = Query(default=None, description="If true, require any All-NBA team"),
-    all_nba_1: bool | None = Query(default=None, description="If true, require All-NBA First Team"),
-    all_nba_2: bool | None = Query(default=None, description="If true, require All-NBA Second Team"),
-    all_nba_3: bool | None = Query(default=None, description="If true, require All-NBA Third Team"),
-    all_defense: bool | None = Query(default=None, description="If true, require any All-Defensive team"),
-    mvp: bool | None = Query(default=None, description="If true, require at least one MVP"),
-    championship: bool | None = Query(default=None, description="If true, require at least one championship"),
-    finals_mvp: bool | None = Query(default=None, description="If true, require at least one Finals MVP"),
+    all_star: bool | None = Query(default=None, description="If true, require at least one All-Star (ignored when min_/max_all_star is set)"),
+    all_nba: bool | None = Query(default=None, description="If true, require any All-NBA team (ignored when min_/max_all_nba is set)"),
+    all_nba_1: bool | None = Query(default=None, description="If true, include All-NBA First Team in All-NBA counts"),
+    all_nba_2: bool | None = Query(default=None, description="If true, include All-NBA Second Team in All-NBA counts"),
+    all_nba_3: bool | None = Query(default=None, description="If true, include All-NBA Third Team in All-NBA counts"),
+    all_defense: bool | None = Query(default=None, description="If true, require any All-Defensive team (ignored when min_/max_all_defense is set)"),
+    all_defense_1: bool | None = Query(default=None, description="If true, include All-Defensive First Team in All-Defensive counts"),
+    all_defense_2: bool | None = Query(default=None, description="If true, include All-Defensive Second Team in All-Defensive counts"),
+    mvp: bool | None = Query(default=None, description="If true, require at least one MVP (ignored when min_/max_mvp is set)"),
+    championship: bool | None = Query(default=None, description="If true, require at least one championship (ignored when min_/max_championship is set)"),
+    finals_mvp: bool | None = Query(default=None, description="If true, require at least one Finals MVP (ignored when min_/max_finals_mvp is set)"),
+    min_all_star: int | None = Query(default=None, ge=0, description="Minimum All-Star selections"),
+    max_all_star: int | None = Query(default=None, ge=0, description="Maximum All-Star selections"),
+    min_all_nba: int | None = Query(default=None, ge=0, description="Minimum All-NBA selections (selected teams, or all if none specified)"),
+    max_all_nba: int | None = Query(default=None, ge=0, description="Maximum All-NBA selections (selected teams, or all if none specified)"),
+    min_all_defense: int | None = Query(default=None, ge=0, description="Minimum All-Defensive selections (selected teams, or all if none specified)"),
+    max_all_defense: int | None = Query(default=None, ge=0, description="Maximum All-Defensive selections (selected teams, or all if none specified)"),
+    min_mvp: int | None = Query(default=None, ge=0, description="Minimum regular-season MVPs"),
+    max_mvp: int | None = Query(default=None, ge=0, description="Maximum regular-season MVPs"),
+    min_championship: int | None = Query(default=None, ge=0, description="Minimum championships"),
+    max_championship: int | None = Query(default=None, ge=0, description="Maximum championships"),
+    min_finals_mvp: int | None = Query(default=None, ge=0, description="Minimum Finals MVPs"),
+    max_finals_mvp: int | None = Query(default=None, ge=0, description="Maximum Finals MVPs"),
     include_career_stats: bool = Query(default=False, description="Include regular-season career counting totals"),
     include_award_counts: bool = Query(default=False, description="Include career award counts"),
     sort_by: str | None = Query(
@@ -569,11 +613,31 @@ async def list_players(
         v is not None
         for v in (min_pts, max_pts, min_trb, max_trb, min_ast, max_ast, min_stl, max_stl, min_blk, max_blk, min_games, max_games)
     )
-    all_nba_team_slugs = [
-        slug
-        for flag, slug in ((all_nba_1, "all_nba_1"), (all_nba_2, "all_nba_2"), (all_nba_3, "all_nba_3"))
-        if flag
-    ]
+    all_nba_team_slugs = _selected_award_slugs(
+        ((all_nba_1, "all_nba_1"), (all_nba_2, "all_nba_2"), (all_nba_3, "all_nba_3")),
+        ("all_nba_1", "all_nba_2", "all_nba_3"),
+    )
+    all_def_team_slugs = _selected_award_slugs(
+        ((all_defense_1, "all_defense_1"), (all_defense_2, "all_defense_2")),
+        ("all_defense_1", "all_defense_2"),
+    )
+    award_count_bounds_set = any(
+        v is not None
+        for v in (
+            min_all_star,
+            max_all_star,
+            min_all_nba,
+            max_all_nba,
+            min_all_defense,
+            max_all_defense,
+            min_mvp,
+            max_mvp,
+            min_championship,
+            max_championship,
+            min_finals_mvp,
+            max_finals_mvp,
+        )
+    )
     award_filters_set = any(
         (
             hall_of_fame,
@@ -583,7 +647,9 @@ async def list_players(
             mvp,
             championship,
             finals_mvp,
-            bool(all_nba_team_slugs),
+            bool(all_nba_1 or all_nba_2 or all_nba_3),
+            bool(all_defense_1 or all_defense_2),
+            award_count_bounds_set,
         )
     )
     want_career_stats = include_career_stats or stat_bounds_set
@@ -609,20 +675,54 @@ async def list_players(
             stmt = stmt.where(career_start <= active_to)
     if hall_of_fame:
         stmt = stmt.where(Player.hall_of_fame.is_(True))
-    if all_star:
-        stmt = stmt.where(_has_awards("all_star"))
-    if all_nba_team_slugs:
-        stmt = stmt.where(_has_awards(*all_nba_team_slugs))
-    elif all_nba:
-        stmt = stmt.where(_has_awards("all_nba_1", "all_nba_2", "all_nba_3"))
-    if all_defense:
-        stmt = stmt.where(_has_awards("all_defense_1", "all_defense_2"))
-    if mvp:
-        stmt = stmt.where(_has_awards("mvp"))
-    if championship:
-        stmt = stmt.where(_has_awards("championship"))
-    if finals_mvp:
-        stmt = stmt.where(_has_awards("finals_mvp"))
+    stmt = _apply_award_count_bounds(
+        stmt,
+        slugs=["all_star"],
+        min_v=min_all_star,
+        max_v=max_all_star,
+        label="all_star",
+        legacy=all_star,
+    )
+    stmt = _apply_award_count_bounds(
+        stmt,
+        slugs=all_nba_team_slugs,
+        min_v=min_all_nba,
+        max_v=max_all_nba,
+        label="all_nba",
+        legacy=all_nba or bool(all_nba_1 or all_nba_2 or all_nba_3),
+    )
+    stmt = _apply_award_count_bounds(
+        stmt,
+        slugs=all_def_team_slugs,
+        min_v=min_all_defense,
+        max_v=max_all_defense,
+        label="all_defense",
+        legacy=all_defense or bool(all_defense_1 or all_defense_2),
+    )
+    stmt = _apply_award_count_bounds(
+        stmt,
+        slugs=["mvp"],
+        min_v=min_mvp,
+        max_v=max_mvp,
+        label="mvp",
+        legacy=mvp,
+    )
+    stmt = _apply_award_count_bounds(
+        stmt,
+        slugs=["championship"],
+        min_v=min_championship,
+        max_v=max_championship,
+        label="championship",
+        legacy=championship,
+    )
+    stmt = _apply_award_count_bounds(
+        stmt,
+        slugs=["finals_mvp"],
+        min_v=min_finals_mvp,
+        max_v=max_finals_mvp,
+        label="finals_mvp",
+        legacy=finals_mvp,
+    )
 
     # Retired/active filtering (optional)
     if include_active is False and include_retired is False:
@@ -724,6 +824,7 @@ async def list_players(
                 sort_dir=sort_dir,
                 stat_mode=stat_mode,
                 all_nba_slugs=all_nba_team_slugs,
+                all_def_slugs=all_def_team_slugs,
             )
         )
     else:

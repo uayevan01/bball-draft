@@ -24,6 +24,8 @@ class PlayerAwardCountsOut(ORMBaseModel):
     all_nba_2: int = 0
     all_nba_3: int = 0
     all_defense: int = 0
+    all_defense_1: int = 0
+    all_defense_2: int = 0
     mvp: int = 0
     championship: int = 0
     finals_mvp: int = 0
