@@ -9,6 +9,27 @@ export type Team = {
   dissolved_year?: number | null;
 };
 
+export type PlayerCareerStats = {
+  pts?: number | null;
+  trb?: number | null;
+  ast?: number | null;
+  stl?: number | null;
+  blk?: number | null;
+  games?: number | null;
+};
+
+export type PlayerAwardCounts = {
+  all_star?: number;
+  all_nba?: number;
+  all_nba_1?: number;
+  all_nba_2?: number;
+  all_nba_3?: number;
+  all_defense?: number;
+  mvp?: number;
+  championship?: number;
+  finals_mvp?: number;
+};
+
 export type PlayerListItem = {
   id: number;
   name: string;
@@ -22,6 +43,9 @@ export type PlayerListItem = {
   hall_of_fame: boolean;
   position?: string | null;
   image_url?: string | null;
+  latest_team_id?: number | null;
+  career_stats?: PlayerCareerStats | null;
+  award_counts?: PlayerAwardCounts | null;
 };
 
 export type PlayerDetail = PlayerListItem & {

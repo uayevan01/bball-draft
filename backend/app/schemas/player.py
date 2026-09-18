@@ -6,6 +6,29 @@ from app.schemas.base import ORMBaseModel
 from app.schemas.player_team_stint import PlayerTeamStintWithTeamOut
 
 
+class PlayerCareerStatsOut(ORMBaseModel):
+    """Regular-season career counting totals. Per-game values are derived by the client."""
+
+    pts: int | None = None
+    trb: int | None = None
+    ast: int | None = None
+    stl: int | None = None
+    blk: int | None = None
+    games: int | None = None
+
+
+class PlayerAwardCountsOut(ORMBaseModel):
+    all_star: int = 0
+    all_nba: int = 0
+    all_nba_1: int = 0
+    all_nba_2: int = 0
+    all_nba_3: int = 0
+    all_defense: int = 0
+    mvp: int = 0
+    championship: int = 0
+    finals_mvp: int = 0
+
+
 class PlayerOut(ORMBaseModel):
     id: int
     name: str
@@ -19,6 +42,9 @@ class PlayerOut(ORMBaseModel):
     hall_of_fame: bool = False
     position: str | None = None
     image_url: str | None = None
+    latest_team_id: int | None = None
+    career_stats: PlayerCareerStatsOut | None = None
+    award_counts: PlayerAwardCountsOut | None = None
 
 
 class PlayerDetailOut(PlayerOut):

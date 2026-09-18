@@ -3,13 +3,13 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import and_, desc, exists, func, or_, select
+from sqlalchemy import Float, and_, desc, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
 from app.database import get_db
-from app.models import Player, PlayerAward, PlayerSeasonStat, PlayerTeamStint, Season, Team
-from app.schemas.player import PlayerDetailOut, PlayerOut
+from app.models import Award, Player, PlayerAward, PlayerSeasonStat, PlayerTeamStint, Season, Team
+from app.schemas.player import PlayerAwardCountsOut, PlayerCareerStatsOut, PlayerDetailOut, PlayerOut
 from app.schemas.player_award import PlayerAwardOut
 from app.schemas.player_season_stat import (
     PlayerSeasonStatOut,
@@ -43,6 +43,44 @@ _COUNTING_FIELDS = (
 )
 
 _SEASON_TYPES = ("regular", "postseason", "all")
+_STAT_MODES = ("totals", "per_game")
+_SORT_DIRS = ("asc", "desc")
+_SORT_KEYS = (
+    "name",
+    "position",
+    "team",
+    "years",
+    "pts",
+    "trb",
+    "ast",
+    "stl",
+    "blk",
+    "hof",
+    "all_nba",
+    "all_star",
+    "all_def",
+    "mvp",
+    "rings",
+    "fmvp",
+)
+_STAT_SORT_COLS = {
+    "pts": PlayerSeasonStat.pts,
+    "trb": PlayerSeasonStat.trb,
+    "ast": PlayerSeasonStat.ast,
+    "stl": PlayerSeasonStat.stl,
+    "blk": PlayerSeasonStat.blk,
+}
+_AWARD_COUNT_SLUGS = (
+    "all_star",
+    "all_nba_1",
+    "all_nba_2",
+    "all_nba_3",
+    "all_defense_1",
+    "all_defense_2",
+    "mvp",
+    "championship",
+    "finals_mvp",
+)
 
 
 def _safe_div(num: float | None, den: float | None) -> float | None:
@@ -203,6 +241,216 @@ def _team_franchise_root_id(team_id: int, prev_by_id: dict[int, int | None]) -> 
     return cur
 
 
+def _int_or_none(value: object) -> int | None:
+    if value is None:
+        return None
+    return int(value)
+
+
+def _has_awards(*slugs: str):
+    return exists(
+        select(1)
+        .select_from(PlayerAward)
+        .join(Award, Award.id == PlayerAward.award_id)
+        .where(PlayerAward.player_id == Player.id, Award.slug.in_(list(slugs)))
+    )
+
+
+def _career_stat_expr(col: object, *, per_game: bool):
+    total = func.coalesce(func.sum(col), 0)
+    if not per_game:
+        return total
+    games = func.nullif(func.coalesce(func.sum(PlayerSeasonStat.games), 0), 0)
+    # Cast so Postgres does float division (integer / integer would truncate PPG).
+    return func.cast(total, Float) / games
+
+
+def _career_stat_sort_expr(col: object, *, per_game: bool):
+    return (
+        select(_career_stat_expr(col, per_game=per_game))
+        .where(
+            PlayerSeasonStat.player_id == Player.id,
+            PlayerSeasonStat.is_postseason.is_(False),
+        )
+        .scalar_subquery()
+    )
+
+
+def _award_count_sort_expr(*slugs: str):
+    return (
+        select(func.count())
+        .select_from(PlayerAward)
+        .join(Award, Award.id == PlayerAward.award_id)
+        .where(PlayerAward.player_id == Player.id, Award.slug.in_(list(slugs)))
+        .scalar_subquery()
+    )
+
+
+def _latest_team_sort_expr():
+    return (
+        select(func.coalesce(Team.abbreviation, Team.name))
+        .select_from(PlayerTeamStint)
+        .join(Team, Team.id == PlayerTeamStint.team_id)
+        .where(PlayerTeamStint.player_id == Player.id)
+        .order_by(PlayerTeamStint.start_year.desc(), PlayerTeamStint.id.desc())
+        .limit(1)
+        .scalar_subquery()
+    )
+
+
+def _directed(expr, sort_dir: str):
+    ordered = expr.desc() if sort_dir == "desc" else expr.asc()
+    return ordered.nulls_last()
+
+
+def _player_list_order_by(
+    *,
+    sort_by: str,
+    sort_dir: str,
+    stat_mode: str,
+    all_nba_slugs: list[str],
+):
+    per_game = stat_mode == "per_game"
+    if sort_by in _STAT_SORT_COLS:
+        primary = _directed(_career_stat_sort_expr(_STAT_SORT_COLS[sort_by], per_game=per_game), sort_dir)
+    elif sort_by == "name":
+        primary = _directed(Player.name, sort_dir)
+    elif sort_by == "position":
+        primary = _directed(Player.position, sort_dir)
+    elif sort_by == "team":
+        primary = _directed(_latest_team_sort_expr(), sort_dir)
+    elif sort_by == "years":
+        primary = _directed(Player.career_start_year, sort_dir)
+    elif sort_by == "hof":
+        primary = _directed(Player.hall_of_fame, sort_dir)
+    elif sort_by == "all_nba":
+        slugs = all_nba_slugs or ["all_nba_1", "all_nba_2", "all_nba_3"]
+        primary = _directed(_award_count_sort_expr(*slugs), sort_dir)
+    elif sort_by == "all_star":
+        primary = _directed(_award_count_sort_expr("all_star"), sort_dir)
+    elif sort_by == "all_def":
+        primary = _directed(_award_count_sort_expr("all_defense_1", "all_defense_2"), sort_dir)
+    elif sort_by == "mvp":
+        primary = _directed(_award_count_sort_expr("mvp"), sort_dir)
+    elif sort_by == "rings":
+        primary = _directed(_award_count_sort_expr("championship"), sort_dir)
+    elif sort_by == "fmvp":
+        primary = _directed(_award_count_sort_expr("finals_mvp"), sort_dir)
+    else:
+        primary = _directed(Player.name, sort_dir)
+
+    if sort_by == "name":
+        return (primary, Player.id.asc())
+    if sort_by == "years":
+        return (primary, _directed(Player.retirement_year, sort_dir), Player.name.asc(), Player.id.asc())
+    return (primary, Player.name.asc(), Player.id.asc())
+
+
+async def _hydrate_player_list(
+    db: AsyncSession,
+    players: list[Player],
+    *,
+    include_career_stats: bool,
+    include_award_counts: bool,
+) -> list[PlayerOut]:
+    outs = [PlayerOut.model_validate(p) for p in players]
+    if not players:
+        return outs
+    ids = [p.id for p in players]
+
+    latest_team_by_id: dict[int, int] = {}
+    stint_rows = (
+        await db.execute(
+            select(PlayerTeamStint.player_id, PlayerTeamStint.team_id)
+            .where(PlayerTeamStint.player_id.in_(ids))
+            .order_by(
+                PlayerTeamStint.player_id.asc(),
+                PlayerTeamStint.start_year.desc(),
+                PlayerTeamStint.id.desc(),
+            )
+        )
+    ).all()
+    for pid_raw, team_id_raw in stint_rows:
+        pid = int(pid_raw)
+        if pid not in latest_team_by_id:
+            latest_team_by_id[pid] = int(team_id_raw)
+
+    stats_by_id: dict[int, PlayerCareerStatsOut] = {}
+    if include_career_stats:
+        rows = (
+            await db.execute(
+                select(
+                    PlayerSeasonStat.player_id,
+                    func.sum(PlayerSeasonStat.pts),
+                    func.sum(PlayerSeasonStat.trb),
+                    func.sum(PlayerSeasonStat.ast),
+                    func.sum(PlayerSeasonStat.stl),
+                    func.sum(PlayerSeasonStat.blk),
+                    func.sum(PlayerSeasonStat.games),
+                )
+                .where(
+                    PlayerSeasonStat.player_id.in_(ids),
+                    PlayerSeasonStat.is_postseason.is_(False),
+                )
+                .group_by(PlayerSeasonStat.player_id)
+            )
+        ).all()
+        for pid, pts, trb, ast, stl, blk, games in rows:
+            stats_by_id[int(pid)] = PlayerCareerStatsOut(
+                pts=_int_or_none(pts),
+                trb=_int_or_none(trb),
+                ast=_int_or_none(ast),
+                stl=_int_or_none(stl),
+                blk=_int_or_none(blk),
+                games=_int_or_none(games),
+            )
+
+    awards_by_id: dict[int, PlayerAwardCountsOut] = {}
+    if include_award_counts:
+        raw: dict[int, dict[str, int]] = {pid: {} for pid in ids}
+        rows = (
+            await db.execute(
+                select(PlayerAward.player_id, Award.slug, func.count())
+                .join(Award, Award.id == PlayerAward.award_id)
+                .where(
+                    PlayerAward.player_id.in_(ids),
+                    Award.slug.in_(_AWARD_COUNT_SLUGS),
+                )
+                .group_by(PlayerAward.player_id, Award.slug)
+            )
+        ).all()
+        for pid, slug, n in rows:
+            raw[int(pid)][str(slug)] = int(n)
+        for pid, counts in raw.items():
+            a1 = counts.get("all_nba_1", 0)
+            a2 = counts.get("all_nba_2", 0)
+            a3 = counts.get("all_nba_3", 0)
+            d1 = counts.get("all_defense_1", 0)
+            d2 = counts.get("all_defense_2", 0)
+            awards_by_id[pid] = PlayerAwardCountsOut(
+                all_star=counts.get("all_star", 0),
+                all_nba=a1 + a2 + a3,
+                all_nba_1=a1,
+                all_nba_2=a2,
+                all_nba_3=a3,
+                all_defense=d1 + d2,
+                mvp=counts.get("mvp", 0),
+                championship=counts.get("championship", 0),
+                finals_mvp=counts.get("finals_mvp", 0),
+            )
+
+    return [
+        o.model_copy(
+            update={
+                "latest_team_id": latest_team_by_id.get(o.id),
+                "career_stats": stats_by_id.get(o.id) if include_career_stats else None,
+                "award_counts": awards_by_id.get(o.id) if include_award_counts else None,
+            }
+        )
+        for o in outs
+    ]
+
+
 def _coalesced_team_stint_count(*, stint_team_ids_in_order: list[int], prev_by_id: dict[int, int | None]) -> int:
     """
     Count stints after coalescing consecutive stints that belong to the same franchise.
@@ -223,6 +471,15 @@ async def list_players(
     q: str | None = Query(default=None, description="Search by player name"),
     draft_year: int | None = Query(default=None),
     team_id: int | None = Query(default=None),
+    position: str | None = Query(default=None, description="Filter by position (substring match, e.g. G or F-C)"),
+    active_from: int | None = Query(
+        default=None,
+        description="Career overlap start year (inclusive). Blank/omitted means no lower bound.",
+    ),
+    active_to: int | None = Query(
+        default=None,
+        description="Career overlap end year (inclusive). Blank/omitted means no upper bound.",
+    ),
     stint_team_id: int | None = Query(default=None, description="Filter by PlayerTeamStint.team_id"),
     stint_team_ids: str | None = Query(
         default=None,
@@ -242,27 +499,96 @@ async def list_players(
     stint_end_year: int | None = Query(default=None, description="Filter by stint overlap end year (inclusive)"),
     min_team_stints: int | None = Query(default=None, ge=0, description="Minimum number of team stints (coalescing consecutive same-franchise stints)"),
     max_team_stints: int | None = Query(default=None, ge=0, description="Maximum number of team stints (coalescing consecutive same-franchise stints)"),
-    # Career totals (SUM across regular-season player_season_stats rows)
-    min_pts: int | None = Query(default=None, ge=0, description="Minimum career total points"),
-    max_pts: int | None = Query(default=None, ge=0, description="Maximum career total points"),
-    min_trb: int | None = Query(default=None, ge=0, description="Minimum career total rebounds"),
-    max_trb: int | None = Query(default=None, ge=0, description="Maximum career total rebounds"),
-    min_ast: int | None = Query(default=None, ge=0, description="Minimum career total assists"),
-    max_ast: int | None = Query(default=None, ge=0, description="Maximum career total assists"),
-    min_stl: int | None = Query(default=None, ge=0, description="Minimum career total steals"),
-    max_stl: int | None = Query(default=None, ge=0, description="Maximum career total steals"),
-    min_blk: int | None = Query(default=None, ge=0, description="Minimum career total blocks"),
-    max_blk: int | None = Query(default=None, ge=0, description="Maximum career total blocks"),
+    stat_mode: str = Query(
+        default="totals",
+        description='How min_/max_ counting-stat bounds are applied: "totals" or "per_game".',
+    ),
+    # Career counting stats (regular season). Bounds are totals or per-game based on stat_mode.
+    min_pts: float | None = Query(default=None, ge=0, description="Minimum career points (totals or per-game)"),
+    max_pts: float | None = Query(default=None, ge=0, description="Maximum career points (totals or per-game)"),
+    min_trb: float | None = Query(default=None, ge=0, description="Minimum career rebounds (totals or per-game)"),
+    max_trb: float | None = Query(default=None, ge=0, description="Maximum career rebounds (totals or per-game)"),
+    min_ast: float | None = Query(default=None, ge=0, description="Minimum career assists (totals or per-game)"),
+    max_ast: float | None = Query(default=None, ge=0, description="Maximum career assists (totals or per-game)"),
+    min_stl: float | None = Query(default=None, ge=0, description="Minimum career steals (totals or per-game)"),
+    max_stl: float | None = Query(default=None, ge=0, description="Maximum career steals (totals or per-game)"),
+    min_blk: float | None = Query(default=None, ge=0, description="Minimum career blocks (totals or per-game)"),
+    max_blk: float | None = Query(default=None, ge=0, description="Maximum career blocks (totals or per-game)"),
     min_games: int | None = Query(default=None, ge=0, description="Minimum career games played"),
     max_games: int | None = Query(default=None, ge=0, description="Maximum career games played"),
+    hall_of_fame: bool | None = Query(default=None, description="If true, only Hall of Fame players"),
+    all_star: bool | None = Query(default=None, description="If true, require at least one All-Star selection"),
+    all_nba: bool | None = Query(default=None, description="If true, require any All-NBA team"),
+    all_nba_1: bool | None = Query(default=None, description="If true, require All-NBA First Team"),
+    all_nba_2: bool | None = Query(default=None, description="If true, require All-NBA Second Team"),
+    all_nba_3: bool | None = Query(default=None, description="If true, require All-NBA Third Team"),
+    all_defense: bool | None = Query(default=None, description="If true, require any All-Defensive team"),
+    mvp: bool | None = Query(default=None, description="If true, require at least one MVP"),
+    championship: bool | None = Query(default=None, description="If true, require at least one championship"),
+    finals_mvp: bool | None = Query(default=None, description="If true, require at least one Finals MVP"),
+    include_career_stats: bool = Query(default=False, description="Include regular-season career counting totals"),
+    include_award_counts: bool = Query(default=False, description="Include career award counts"),
+    sort_by: str | None = Query(
+        default=None,
+        description=(
+            "Sort column for the player database. Omit to keep Hall of Fame / career-length ordering "
+            f"(used by the draft pool). One of: {', '.join(_SORT_KEYS)}."
+        ),
+    ),
+    sort_dir: str = Query(default="asc", description='Sort direction: "asc" or "desc"'),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
-) -> list[Player]:
+) -> list[PlayerOut]:
     current_year = datetime.now(timezone.utc).year
     career_len = (
         func.coalesce(Player.retirement_year, current_year) - func.coalesce(Player.career_start_year, current_year)
     )
+    if stat_mode not in _STAT_MODES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"stat_mode must be one of: {', '.join(_STAT_MODES)}",
+        )
+    if active_from is not None and active_to is not None and active_from > active_to:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="active_from cannot exceed active_to",
+        )
+    if sort_dir not in _SORT_DIRS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"sort_dir must be one of: {', '.join(_SORT_DIRS)}",
+        )
+    if sort_by is not None and sort_by not in _SORT_KEYS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"sort_by must be one of: {', '.join(_SORT_KEYS)}",
+        )
+
+    stat_bounds_set = any(
+        v is not None
+        for v in (min_pts, max_pts, min_trb, max_trb, min_ast, max_ast, min_stl, max_stl, min_blk, max_blk, min_games, max_games)
+    )
+    all_nba_team_slugs = [
+        slug
+        for flag, slug in ((all_nba_1, "all_nba_1"), (all_nba_2, "all_nba_2"), (all_nba_3, "all_nba_3"))
+        if flag
+    ]
+    award_filters_set = any(
+        (
+            hall_of_fame,
+            all_star,
+            all_nba,
+            all_defense,
+            mvp,
+            championship,
+            finals_mvp,
+            bool(all_nba_team_slugs),
+        )
+    )
+    want_career_stats = include_career_stats or stat_bounds_set
+    want_award_counts = include_award_counts or award_filters_set
+
     stmt = select(Player)
     if q:
         stmt = stmt.where(Player.name.ilike(f"%{q}%"))
@@ -270,6 +596,33 @@ async def list_players(
         stmt = stmt.where(Player.draft_year == draft_year)
     if team_id is not None:
         stmt = stmt.where(Player.team_id == team_id)
+    if position:
+        pos = position.strip()[:30]
+        if pos:
+            stmt = stmt.where(Player.position.ilike(f"%{pos}%"))
+    if active_from is not None or active_to is not None:
+        career_end = func.coalesce(Player.retirement_year, current_year)
+        career_start = func.coalesce(Player.career_start_year, current_year)
+        if active_from is not None:
+            stmt = stmt.where(career_end >= active_from)
+        if active_to is not None:
+            stmt = stmt.where(career_start <= active_to)
+    if hall_of_fame:
+        stmt = stmt.where(Player.hall_of_fame.is_(True))
+    if all_star:
+        stmt = stmt.where(_has_awards("all_star"))
+    if all_nba_team_slugs:
+        stmt = stmt.where(_has_awards(*all_nba_team_slugs))
+    elif all_nba:
+        stmt = stmt.where(_has_awards("all_nba_1", "all_nba_2", "all_nba_3"))
+    if all_defense:
+        stmt = stmt.where(_has_awards("all_defense_1", "all_defense_2"))
+    if mvp:
+        stmt = stmt.where(_has_awards("mvp"))
+    if championship:
+        stmt = stmt.where(_has_awards("championship"))
+    if finals_mvp:
+        stmt = stmt.where(_has_awards("finals_mvp"))
 
     # Retired/active filtering (optional)
     if include_active is False and include_retired is False:
@@ -331,25 +684,27 @@ async def list_players(
             else:
                 stmt = stmt.where(first_letter.in_(letters))
 
-    career_stat_bounds: list[tuple[str, int | None, int | None, object]] = [
-        ("pts", min_pts, max_pts, PlayerSeasonStat.pts),
-        ("trb", min_trb, max_trb, PlayerSeasonStat.trb),
-        ("ast", min_ast, max_ast, PlayerSeasonStat.ast),
-        ("stl", min_stl, max_stl, PlayerSeasonStat.stl),
-        ("blk", min_blk, max_blk, PlayerSeasonStat.blk),
-        ("games", min_games, max_games, PlayerSeasonStat.games),
+    career_stat_bounds: list[tuple[str, float | int | None, float | int | None, object, bool]] = [
+        ("pts", min_pts, max_pts, PlayerSeasonStat.pts, True),
+        ("trb", min_trb, max_trb, PlayerSeasonStat.trb, True),
+        ("ast", min_ast, max_ast, PlayerSeasonStat.ast, True),
+        ("stl", min_stl, max_stl, PlayerSeasonStat.stl, True),
+        ("blk", min_blk, max_blk, PlayerSeasonStat.blk, True),
+        ("games", min_games, max_games, PlayerSeasonStat.games, False),
     ]
     having_clauses = []
-    for label, min_v, max_v, col in career_stat_bounds:
+    per_game = stat_mode == "per_game"
+    for label, min_v, max_v, col, uses_stat_mode in career_stat_bounds:
         if min_v is not None and max_v is not None and min_v > max_v:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"min_{label} cannot exceed max_{label}",
             )
+        expr = _career_stat_expr(col, per_game=per_game and uses_stat_mode)
         if min_v is not None:
-            having_clauses.append(func.coalesce(func.sum(col), 0) >= min_v)
+            having_clauses.append(expr >= min_v)
         if max_v is not None:
-            having_clauses.append(func.coalesce(func.sum(col), 0) <= max_v)
+            having_clauses.append(expr <= max_v)
     if having_clauses:
         career_subq = (
             select(PlayerSeasonStat.player_id)
@@ -360,8 +715,19 @@ async def list_players(
         )
         stmt = stmt.where(Player.id.in_(career_subq))
 
-    # Default ordering: Hall of Fame first, then longest career.
-    stmt = stmt.order_by(desc(Player.hall_of_fame), desc(career_len), Player.name)
+    # Players database sends sort_by explicitly (default name). Draft pool omits it to
+    # keep Hall of Fame / longest-career ordering for the spin animation.
+    if sort_by:
+        stmt = stmt.order_by(
+            *_player_list_order_by(
+                sort_by=sort_by,
+                sort_dir=sort_dir,
+                stat_mode=stat_mode,
+                all_nba_slugs=all_nba_team_slugs,
+            )
+        )
+    else:
+        stmt = stmt.order_by(desc(Player.hall_of_fame), desc(career_len), Player.name)
 
     # Optional stint-count filtering (requires coalescing by franchise root).
     # We implement this with an ordered over-fetch loop so pagination stays stable.
@@ -427,10 +793,22 @@ async def list_players(
             return []
         players = (await db.execute(select(Player).where(Player.id.in_(selected)))).scalars().all()
         by_id = {p.id: p for p in players}
-        return [by_id[i] for i in selected if i in by_id]
+        ordered = [by_id[i] for i in selected if i in by_id]
+        return await _hydrate_player_list(
+            db,
+            ordered,
+            include_career_stats=want_career_stats,
+            include_award_counts=want_award_counts,
+        )
 
     stmt = stmt.limit(limit).offset(offset)
-    return (await db.execute(stmt)).scalars().all()
+    players = list((await db.execute(stmt)).scalars().all())
+    return await _hydrate_player_list(
+        db,
+        players,
+        include_career_stats=want_career_stats,
+        include_award_counts=want_award_counts,
+    )
 
 
 @router.get("/{player_id}", response_model=PlayerOut)
