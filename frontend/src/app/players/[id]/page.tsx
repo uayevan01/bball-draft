@@ -172,38 +172,231 @@ function seasonSortValue(
   return raw;
 }
 
-function sortSeasonRows(
+const COUNTING_SUM_FIELDS = [
+  "games",
+  "games_started",
+  "minutes",
+  "fg",
+  "fga",
+  "fg3",
+  "fg3a",
+  "fg2",
+  "fg2a",
+  "ft",
+  "fta",
+  "orb",
+  "drb",
+  "trb",
+  "ast",
+  "stl",
+  "blk",
+  "tov",
+  "pf",
+  "pts",
+] as const;
+
+const ADVANCED_SUM_FIELDS = ["ows", "dws", "ws", "vorp"] as const;
+
+const ADVANCED_WEIGHT_FIELDS = [
+  "per",
+  "usg_pct",
+  "orb_pct",
+  "drb_pct",
+  "trb_pct",
+  "ast_pct",
+  "stl_pct",
+  "blk_pct",
+  "tov_pct",
+  "ws_per_48",
+  "obpm",
+  "dbpm",
+  "bpm",
+] as const;
+
+/** Synthetic combined row for a mid-season trade (BRef TOT). */
+function coalesceSeasonParts(parts: PlayerSeasonStat[]): PlayerSeasonStat {
+  const base = parts[0];
+  const out: PlayerSeasonStat = {
+    ...base,
+    // Negative id keeps React keys unique and out of the way of real row ids.
+    id: -base.season_id,
+    team_id: 0,
+  };
+
+  for (const field of COUNTING_SUM_FIELDS) {
+    let sum = 0;
+    let any = false;
+    for (const p of parts) {
+      const v = p[field];
+      if (v != null) {
+        sum += v;
+        any = true;
+      }
+    }
+    out[field] = any ? sum : null;
+  }
+
+  for (const field of ADVANCED_SUM_FIELDS) {
+    let sum = 0;
+    let any = false;
+    for (const p of parts) {
+      const v = p[field];
+      if (v != null) {
+        sum += v;
+        any = true;
+      }
+    }
+    out[field] = any ? sum : null;
+  }
+
+  const fg = out.fg ?? null;
+  const fga = out.fga ?? null;
+  const fg3 = out.fg3 ?? null;
+  const fg3a = out.fg3a ?? null;
+  const ft = out.ft ?? null;
+  const fta = out.fta ?? null;
+  const pts = out.pts ?? null;
+  out.fg_pct = fg != null && fga != null && fga > 0 ? fg / fga : null;
+  out.fg3_pct = fg3 != null && fg3a != null && fg3a > 0 ? fg3 / fg3a : null;
+  out.ft_pct = ft != null && fta != null && fta > 0 ? ft / fta : null;
+  out.efg_pct =
+    fg != null && fga != null && fga > 0 ? (fg + 0.5 * (fg3 ?? 0)) / fga : null;
+  if (pts != null && fga != null) {
+    const denom = 2 * (fga + 0.44 * (fta ?? 0));
+    out.ts_pct = denom > 0 ? pts / denom : null;
+  } else {
+    out.ts_pct = null;
+  }
+
+  const totalMp = out.minutes ?? 0;
+  for (const field of ADVANCED_WEIGHT_FIELDS) {
+    if (totalMp <= 0) {
+      out[field] = null;
+      continue;
+    }
+    let acc = 0;
+    let used = false;
+    for (const p of parts) {
+      const mp = p.minutes;
+      const v = p[field];
+      if (mp == null || v == null) continue;
+      acc += v * mp;
+      used = true;
+    }
+    out[field] = used ? acc / totalMp : null;
+  }
+
+  return out;
+}
+
+type SeasonDisplayRow = {
+  key: string;
+  row: PlayerSeasonStat;
+  teamLabel: string;
+  /** Individual team line under a TOT row. */
+  isSplitChild: boolean;
+};
+
+function compareSortValues(
+  av: number | string | null,
+  bv: number | string | null,
+  dir: number,
+  tieBreak: () => number,
+): number {
+  if (av == null && bv == null) return tieBreak();
+  if (av == null) return 1;
+  if (bv == null) return -1;
+  if (typeof av === "string" && typeof bv === "string") {
+    const cmp = av.localeCompare(bv);
+    return cmp !== 0 ? cmp * dir : tieBreak();
+  }
+  const an = Number(av);
+  const bn = Number(bv);
+  if (an !== bn) return (an - bn) * dir;
+  return tieBreak();
+}
+
+/**
+ * Group mid-season multi-team seasons under a TOT row (BRef-style), then sort groups.
+ * Team splits stay directly under their TOT regardless of sort column.
+ */
+function buildSeasonDisplayRows(
   rows: PlayerSeasonStat[],
   sortKey: SeasonSortKey,
   sortDir: "asc" | "desc",
   view: StatsView,
   teamsById: Record<number, Team>,
-): PlayerSeasonStat[] {
-  const sorted = [...rows];
-  const dir = sortDir === "asc" ? 1 : -1;
+): SeasonDisplayRow[] {
   const labelFor = (teamId: number) => {
     const t = teamsById[teamId];
     return t?.abbreviation || t?.name || String(teamId);
   };
-  sorted.sort((a, b) => {
-    const av = seasonSortValue(a, sortKey, view, labelFor(a.team_id));
-    const bv = seasonSortValue(b, sortKey, view, labelFor(b.team_id));
-    if (av == null && bv == null) return a.id - b.id;
-    if (av == null) return 1;
-    if (bv == null) return -1;
-    if (typeof av === "string" && typeof bv === "string") {
-      const cmp = av.localeCompare(bv);
-      return cmp !== 0 ? cmp * dir : a.id - b.id;
+
+  const bySeason = new Map<number, PlayerSeasonStat[]>();
+  for (const row of rows) {
+    const list = bySeason.get(row.season_id) ?? [];
+    list.push(row);
+    bySeason.set(row.season_id, list);
+  }
+
+  type Group = {
+    sortRow: PlayerSeasonStat;
+    sortLabel: string;
+    displays: SeasonDisplayRow[];
+  };
+
+  const groups: Group[] = [];
+  for (const [, parts] of bySeason) {
+    const ordered = [...parts].sort((a, b) => a.team_id - b.team_id);
+    if (ordered.length === 1) {
+      const row = ordered[0];
+      groups.push({
+        sortRow: row,
+        sortLabel: labelFor(row.team_id),
+        displays: [
+          {
+            key: `team-${row.id}`,
+            row,
+            teamLabel: labelFor(row.team_id),
+            isSplitChild: false,
+          },
+        ],
+      });
+      continue;
     }
-    const an = Number(av);
-    const bn = Number(bv);
-    if (an !== bn) return (an - bn) * dir;
-    const ay = a.season?.start_year ?? 0;
-    const by = b.season?.start_year ?? 0;
-    if (ay !== by) return ay - by;
-    return a.team_id - b.team_id;
-  });
-  return sorted;
+
+    const tot = coalesceSeasonParts(ordered);
+    groups.push({
+      sortRow: tot,
+      sortLabel: "TOT",
+      displays: [
+        {
+          key: `tot-${tot.season_id}`,
+          row: tot,
+          teamLabel: "TOT",
+          isSplitChild: false,
+        },
+        ...ordered.map((row) => ({
+          key: `team-${row.id}`,
+          row,
+          teamLabel: labelFor(row.team_id),
+          isSplitChild: true,
+        })),
+      ],
+    });
+  }
+
+  const dir = sortDir === "asc" ? 1 : -1;
+  groups.sort((a, b) =>
+    compareSortValues(
+      seasonSortValue(a.sortRow, sortKey, view, a.sortLabel),
+      seasonSortValue(b.sortRow, sortKey, view, b.sortLabel),
+      dir,
+      () => (a.sortRow.season?.start_year ?? 0) - (b.sortRow.season?.start_year ?? 0),
+    ),
+  );
+
+  return groups.flatMap((g) => g.displays);
 }
 
 function defaultSortDir(key: SeasonSortKey): "asc" | "desc" {
@@ -430,13 +623,13 @@ export default function PlayerDetailPage() {
   const scopeLabel = seasonScope === "regular" ? "Regular season" : "Playoff";
 
   const countingRows = useMemo(
-    () => sortSeasonRows(stats?.rows ?? [], countingSortKey, countingSortDir, statsView, teamsById),
+    () => buildSeasonDisplayRows(stats?.rows ?? [], countingSortKey, countingSortDir, statsView, teamsById),
     [stats, countingSortKey, countingSortDir, statsView, teamsById],
   );
 
   const advancedRows = useMemo(
     // Advanced rates don't depend on per-game vs totals.
-    () => sortSeasonRows(stats?.rows ?? [], advancedSortKey, advancedSortDir, "totals", teamsById),
+    () => buildSeasonDisplayRows(stats?.rows ?? [], advancedSortKey, advancedSortDir, "totals", teamsById),
     [stats, advancedSortKey, advancedSortDir, teamsById],
   );
 
@@ -454,13 +647,14 @@ export default function PlayerDetailPage() {
   function showSeasonHover(
     e: ReactMouseEvent<HTMLTableRowElement>,
     row: PlayerSeasonStat,
+    teamLabel: string,
     accolades: string[],
   ) {
     const seasonLabel = row.season?.label || row.season?.start_year || "—";
     const seasonCell = e.currentTarget.cells[0] as HTMLElement | undefined;
     if (!seasonCell) return;
     setSeasonHover({
-      title: `${seasonLabel} · ${teamAbbr(row.team_id)}`,
+      title: `${seasonLabel} · ${teamLabel}`,
       accolades,
       anchor: seasonCell,
     });
@@ -647,14 +841,15 @@ export default function PlayerDetailPage() {
                       </td>
                     </tr>
                   ) : (
-                    countingRows.map((row) => (
+                    countingRows.map((display) => (
                       <CountingSeasonRow
-                        key={row.id}
-                        row={row}
-                        teamLabel={teamAbbr(row.team_id)}
+                        key={display.key}
+                        row={display.row}
+                        teamLabel={display.teamLabel}
                         view={statsView}
-                        seasonAwards={awardsBySeason.get(row.season_id)}
+                        seasonAwards={awardsBySeason.get(display.row.season_id)}
                         scope={seasonScope}
+                        isSplitChild={display.isSplitChild}
                         onHover={showSeasonHover}
                         onLeave={hideSeasonHover}
                       />
@@ -695,13 +890,14 @@ export default function PlayerDetailPage() {
                       </td>
                     </tr>
                   ) : (
-                    advancedRows.map((row) => (
+                    advancedRows.map((display) => (
                       <AdvancedSeasonRow
-                        key={row.id}
-                        row={row}
-                        teamLabel={teamAbbr(row.team_id)}
-                        seasonAwards={awardsBySeason.get(row.season_id)}
+                        key={display.key}
+                        row={display.row}
+                        teamLabel={display.teamLabel}
+                        seasonAwards={awardsBySeason.get(display.row.season_id)}
                         scope={seasonScope}
+                        isSplitChild={display.isSplitChild}
                         onHover={showSeasonHover}
                         onLeave={hideSeasonHover}
                       />
@@ -758,12 +954,15 @@ function SeasonAccoladesCard({ hover }: { hover: SeasonHover }) {
 type SeasonHoverHandler = (
   e: ReactMouseEvent<HTMLTableRowElement>,
   row: PlayerSeasonStat,
+  teamLabel: string,
   accolades: string[],
 ) => void;
 
-function seasonRowClass(hasAccolades: boolean): string {
+function seasonRowClass(hasAccolades: boolean, isSplitChild: boolean): string {
   const base = "border-t border-black/5 dark:border-white/5";
-  return hasAccolades ? `${base} hover:bg-amber-500/10 dark:hover:bg-amber-500/10` : base;
+  const muted = isSplitChild ? "bg-zinc-50/80 text-zinc-500 dark:bg-zinc-950/40 dark:text-zinc-400" : "";
+  const hover = hasAccolades ? "hover:bg-amber-500/10 dark:hover:bg-amber-500/10" : "";
+  return [base, muted, hover].filter(Boolean).join(" ");
 }
 
 function TrophyIcon() {
@@ -924,6 +1123,7 @@ function CountingSeasonRow({
   view,
   seasonAwards,
   scope,
+  isSplitChild,
   onHover,
   onLeave,
 }: {
@@ -932,6 +1132,7 @@ function CountingSeasonRow({
   view: StatsView;
   seasonAwards: SeasonAwards | undefined;
   scope: SeasonScope;
+  isSplitChild: boolean;
   onHover: SeasonHoverHandler;
   onLeave: () => void;
 }) {
@@ -942,12 +1143,16 @@ function CountingSeasonRow({
 
   return (
     <tr
-      className={seasonRowClass(accolades.length > 0)}
-      onMouseEnter={accolades.length > 0 ? (e) => onHover(e, row, accolades) : undefined}
+      className={seasonRowClass(accolades.length > 0, isSplitChild)}
+      onMouseEnter={accolades.length > 0 ? (e) => onHover(e, row, teamLabel, accolades) : undefined}
       onMouseLeave={accolades.length > 0 ? onLeave : undefined}
     >
       <td className="whitespace-nowrap px-2 py-2 first:pl-4">
-        <SeasonCellLabel row={row} slugs={seasonAwards?.slugs} scope={scope} />
+        <SeasonCellLabel
+          row={row}
+          slugs={isSplitChild ? undefined : seasonAwards?.slugs}
+          scope={scope}
+        />
       </td>
       <td className="whitespace-nowrap px-2 py-2">{teamLabel}</td>
       <td className="px-2 py-2 tabular-nums">{fmt(row.games)}</td>
@@ -1012,6 +1217,7 @@ function AdvancedSeasonRow({
   teamLabel,
   seasonAwards,
   scope,
+  isSplitChild,
   onHover,
   onLeave,
 }: {
@@ -1019,6 +1225,7 @@ function AdvancedSeasonRow({
   teamLabel: string;
   seasonAwards: SeasonAwards | undefined;
   scope: SeasonScope;
+  isSplitChild: boolean;
   onHover: SeasonHoverHandler;
   onLeave: () => void;
 }) {
@@ -1026,12 +1233,16 @@ function AdvancedSeasonRow({
 
   return (
     <tr
-      className={seasonRowClass(accolades.length > 0)}
-      onMouseEnter={accolades.length > 0 ? (e) => onHover(e, row, accolades) : undefined}
+      className={seasonRowClass(accolades.length > 0, isSplitChild)}
+      onMouseEnter={accolades.length > 0 ? (e) => onHover(e, row, teamLabel, accolades) : undefined}
       onMouseLeave={accolades.length > 0 ? onLeave : undefined}
     >
       <td className="whitespace-nowrap px-2 py-2 first:pl-4">
-        <SeasonCellLabel row={row} slugs={seasonAwards?.slugs} scope={scope} />
+        <SeasonCellLabel
+          row={row}
+          slugs={isSplitChild ? undefined : seasonAwards?.slugs}
+          scope={scope}
+        />
       </td>
       <td className="whitespace-nowrap px-2 py-2">{teamLabel}</td>
       <td className="px-2 py-2 tabular-nums">{fmt(row.games)}</td>
