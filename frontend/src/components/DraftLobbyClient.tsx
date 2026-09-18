@@ -7,6 +7,7 @@ import { useAuth } from "@clerk/nextjs";
 import { useDraftSocket } from "@/hooks/useDraftSocket";
 import { useTurnTabIndicator } from "@/hooks/useTurnTabIndicator";
 import { backendGet, backendPost } from "@/lib/backendClient";
+import { unwrapPlayerList } from "@/lib/playerTypes";
 import type { Draft } from "@/lib/types";
 import type { DraftRules } from "@/lib/draftRules";
 import { DraftLobbyHeader } from "@/components/draft-lobby/DraftLobbyHeader";
@@ -365,10 +366,14 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
         // Try without token first (faster in some environments); fall back to auth token if needed.
         let data: PlayerSearchResult[] | null = null;
         try {
-          data = await backendGet<PlayerSearchResult[]>(`/players?limit=200`, null);
+          data = unwrapPlayerList(
+            await backendGet<PlayerSearchResult[] | { items: PlayerSearchResult[] }>(`/players?limit=200`, null),
+          ).items;
         } catch {
           const token = await getToken().catch(() => null);
-          data = await backendGet<PlayerSearchResult[]>(`/players?limit=200`, token);
+          data = unwrapPlayerList(
+            await backendGet<PlayerSearchResult[] | { items: PlayerSearchResult[] }>(`/players?limit=200`, token),
+          ).items;
         }
         if (cancelled) return;
         warmPlayerPoolRef.current = (data ?? []).filter((p) => !draftedIds.has(p.id));
@@ -634,7 +639,12 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
           if (c.minTeamStints != null) params.set("min_team_stints", String(c.minTeamStints));
           if (c.maxTeamStints != null) params.set("max_team_stints", String(c.maxTeamStints));
           const token = await getToken().catch(() => null);
-          const data = await backendGet<PlayerSearchResult[]>(`/players?${params.toString()}`, token);
+          const data = unwrapPlayerList(
+            await backendGet<PlayerSearchResult[] | { items: PlayerSearchResult[] }>(
+              `/players?${params.toString()}`,
+              token,
+            ),
+          ).items;
           if (cancelled) return;
           warmPlayerPoolRef.current = (data ?? []).filter((p) => !draftedIds.has(p.id));
         } catch {

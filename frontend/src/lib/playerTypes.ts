@@ -50,6 +50,16 @@ export type PlayerListItem = {
   award_counts?: PlayerAwardCounts | null;
 };
 
+export type PlayerListPage<T = PlayerListItem> = {
+  items: T[];
+  total: number;
+};
+
+export function unwrapPlayerList<T>(data: T[] | { items: T[]; total?: number }): { items: T[]; total: number | null } {
+  if (Array.isArray(data)) return { items: data, total: null };
+  return { items: data.items ?? [], total: typeof data.total === "number" ? data.total : null };
+}
+
 export type PlayerDetail = PlayerListItem & {
   coalesced_team_stint_count?: number;
   team_stints?: Array<{

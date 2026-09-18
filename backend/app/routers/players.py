@@ -9,7 +9,7 @@ from sqlalchemy.orm import joinedload, selectinload
 
 from app.database import get_db
 from app.models import Award, Player, PlayerAward, PlayerSeasonStat, PlayerTeamStint, Season, Team
-from app.schemas.player import PlayerAwardCountsOut, PlayerCareerStatsOut, PlayerDetailOut, PlayerOut
+from app.schemas.player import PlayerAwardCountsOut, PlayerCareerStatsOut, PlayerDetailOut, PlayerListPageOut, PlayerOut
 from app.schemas.player_award import PlayerAwardOut
 from app.schemas.player_season_stat import (
     PlayerSeasonStatOut,
@@ -496,7 +496,7 @@ def _coalesced_team_stint_count(*, stint_team_ids_in_order: list[int], prev_by_i
     return count
 
 
-@router.get("", response_model=list[PlayerOut])
+@router.get("", response_model=PlayerListPageOut)
 async def list_players(
     q: str | None = Query(default=None, description="Search by player name"),
     draft_year: int | None = Query(default=None),
@@ -583,7 +583,7 @@ async def list_players(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
-) -> list[PlayerOut]:
+) -> PlayerListPageOut:
     current_year = datetime.now(timezone.utc).year
     career_len = (
         func.coalesce(Player.retirement_year, current_year) - func.coalesce(Player.career_start_year, current_year)
@@ -726,7 +726,7 @@ async def list_players(
 
     # Retired/active filtering (optional)
     if include_active is False and include_retired is False:
-        return []
+        return PlayerListPageOut(items=[], total=0)
     if include_active is False:
         stmt = stmt.where(Player.retirement_year.is_not(None))
     elif include_retired is False:
@@ -843,13 +843,12 @@ async def list_players(
         # Reuse the same filters + ordering, but only select Player.id (for cheap pagination + stint-count filtering).
         base_ids_stmt = stmt.with_only_columns(Player.id, maintain_column_froms=True)
 
-        want = offset + limit
         matched_ids: list[int] = []
         batch_size = 500
         base_offset = 0
         safety_iters = 0
 
-        while len(matched_ids) < want and safety_iters < 20:
+        while safety_iters < 200:
             safety_iters += 1
             id_rows = (await db.execute(base_ids_stmt.limit(batch_size).offset(base_offset))).all()
             if not id_rows:
@@ -890,25 +889,36 @@ async def list_players(
                 matched_ids.append(pid)
 
         selected = matched_ids[offset: offset + limit]
+        total = len(matched_ids)
         if not selected:
-            return []
+            return PlayerListPageOut(items=[], total=total)
         players = (await db.execute(select(Player).where(Player.id.in_(selected)))).scalars().all()
         by_id = {p.id: p for p in players}
         ordered = [by_id[i] for i in selected if i in by_id]
-        return await _hydrate_player_list(
-            db,
-            ordered,
-            include_career_stats=want_career_stats,
-            include_award_counts=want_award_counts,
+        return PlayerListPageOut(
+            items=await _hydrate_player_list(
+                db,
+                ordered,
+                include_career_stats=want_career_stats,
+                include_award_counts=want_award_counts,
+            ),
+            total=total,
         )
 
+    count_stmt = select(func.count()).select_from(
+        stmt.order_by(None).with_only_columns(Player.id, maintain_column_froms=True).subquery()
+    )
+    total = int((await db.execute(count_stmt)).scalar_one())
     stmt = stmt.limit(limit).offset(offset)
     players = list((await db.execute(stmt)).scalars().all())
-    return await _hydrate_player_list(
-        db,
-        players,
-        include_career_stats=want_career_stats,
-        include_award_counts=want_award_counts,
+    return PlayerListPageOut(
+        items=await _hydrate_player_list(
+            db,
+            players,
+            include_career_stats=want_career_stats,
+            include_award_counts=want_award_counts,
+        ),
+        total=total,
     )
 
 

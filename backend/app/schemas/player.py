@@ -56,3 +56,8 @@ class PlayerDetailOut(PlayerOut):
     coalesced_team_stint_count: int = 0
 
 
+class PlayerListPageOut(ORMBaseModel):
+    items: list[PlayerOut]
+    total: int
+
+

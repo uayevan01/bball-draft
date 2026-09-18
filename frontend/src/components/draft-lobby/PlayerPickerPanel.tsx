@@ -5,6 +5,7 @@ import Image from "next/image";
 import { useAuth } from "@clerk/nextjs";
 
 import { backendGet } from "@/lib/backendClient";
+import { unwrapPlayerList } from "@/lib/playerTypes";
 
 import type { EligibilityConstraint, PlayerDetail, PlayerSearchResult } from "./types";
 
@@ -91,7 +92,12 @@ export function PlayerPickerPanel({
           if (constraint.maxTeamStints != null) params.set("max_team_stints", String(constraint.maxTeamStints));
         }
         const token = await getToken().catch(() => null);
-        const data = await backendGet<PlayerSearchResult[]>(`/players?${params.toString()}`, token);
+        const data = unwrapPlayerList(
+          await backendGet<PlayerSearchResult[] | { items: PlayerSearchResult[] }>(
+            `/players?${params.toString()}`,
+            token,
+          ),
+        ).items;
         if (!cancelled) setResults(data);
       } catch (e) {
         if (!cancelled) setSearchErrorLocal(e instanceof Error ? e.message : "Search failed");

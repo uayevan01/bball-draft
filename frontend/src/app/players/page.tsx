@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { AppShell } from "@/components/AppShell";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { backendGet } from "@/lib/backendClient";
-import type { PlayerAwardCounts, PlayerListItem, Team } from "@/lib/playerTypes";
+import { unwrapPlayerList, type PlayerAwardCounts, type PlayerListItem, type PlayerListPage, type Team } from "@/lib/playerTypes";
 import { formatCareerYears } from "@/lib/seasonYears";
 
 const PAGE_SIZE = 50;
@@ -291,6 +291,7 @@ function defaultSortDir(key: SortKey): SortDir {
 export default function PlayersPage() {
   const { getToken } = useAuth();
   const [players, setPlayers] = useState<PlayerListItem[]>([]);
+  const [totalResults, setTotalResults] = useState<number | null>(null);
   const [teams, setTeams] = useState<Team[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -464,8 +465,13 @@ export default function PlayersPage() {
       setError(null);
       try {
         const token = await getToken().catch(() => null);
-        const rows = await backendGet<PlayerListItem[]>(`/players?${queryString}`, token);
-        if (!cancelled) setPlayers(rows);
+        const page = unwrapPlayerList(
+          await backendGet<PlayerListItem[] | PlayerListPage>(`/players?${queryString}`, token),
+        );
+        if (!cancelled) {
+          setPlayers(page.items);
+          setTotalResults(page.total);
+        }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load players.");
       } finally {
@@ -936,11 +942,12 @@ export default function PlayersPage() {
           Previous
         </button>
         <div className="text-center text-xs text-zinc-500 sm:text-sm">
+          {totalResults != null ? `${totalResults.toLocaleString()} results · ` : ""}
           Showing {players.length ? offset + 1 : 0}–{offset + players.length}
         </div>
         <button
           type="button"
-          disabled={players.length < PAGE_SIZE || loading}
+          disabled={(totalResults != null ? offset + players.length >= totalResults : players.length < PAGE_SIZE) || loading}
           onClick={() => setOffset((o) => o + PAGE_SIZE)}
           className="h-10 rounded-full border border-black/10 px-3 text-sm font-semibold disabled:opacity-40 sm:px-4 dark:border-white/10"
         >
