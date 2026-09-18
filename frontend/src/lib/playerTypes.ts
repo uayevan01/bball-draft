@@ -75,6 +75,13 @@ export type PlayerSeasonStat = {
   efg_pct?: number | null;
   ts_pct?: number | null;
   per?: number | null;
+  orb_pct?: number | null;
+  drb_pct?: number | null;
+  trb_pct?: number | null;
+  ast_pct?: number | null;
+  stl_pct?: number | null;
+  blk_pct?: number | null;
+  tov_pct?: number | null;
   usg_pct?: number | null;
   ows?: number | null;
   dws?: number | null;
@@ -111,9 +118,22 @@ export type PlayerSeasonStatsAggregate = {
   ft_pct?: number | null;
   ts_pct?: number | null;
   per?: number | null;
+  orb_pct?: number | null;
+  drb_pct?: number | null;
+  trb_pct?: number | null;
+  ast_pct?: number | null;
+  stl_pct?: number | null;
+  blk_pct?: number | null;
+  tov_pct?: number | null;
+  usg_pct?: number | null;
+  ows?: number | null;
+  dws?: number | null;
   ws?: number | null;
-  vorp?: number | null;
+  ws_per_48?: number | null;
+  obpm?: number | null;
+  dbpm?: number | null;
   bpm?: number | null;
+  vorp?: number | null;
 };
 
 export type SeasonScope = "regular" | "postseason";

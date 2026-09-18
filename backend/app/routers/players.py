@@ -112,6 +112,13 @@ def _aggregate_season_stats(
         "dbpm": None,
         "usg_pct": None,
         "ws_per_48": None,
+        "orb_pct": None,
+        "drb_pct": None,
+        "trb_pct": None,
+        "ast_pct": None,
+        "stl_pct": None,
+        "blk_pct": None,
+        "tov_pct": None,
     }
     if total_mp and total_mp > 0:
         for field in weighted:
@@ -170,6 +177,13 @@ def _aggregate_season_stats(
         dbpm=weighted["dbpm"],
         usg_pct=weighted["usg_pct"],
         ws_per_48=weighted["ws_per_48"],
+        orb_pct=weighted["orb_pct"],
+        drb_pct=weighted["drb_pct"],
+        trb_pct=weighted["trb_pct"],
+        ast_pct=weighted["ast_pct"],
+        stl_pct=weighted["stl_pct"],
+        blk_pct=weighted["blk_pct"],
+        tov_pct=weighted["tov_pct"],
     )
 
 

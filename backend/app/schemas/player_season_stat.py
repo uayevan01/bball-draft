@@ -113,6 +113,13 @@ class PlayerSeasonStatsAggregateOut(ORMBaseModel):
     dbpm: float | None = None
     usg_pct: float | None = None
     ws_per_48: float | None = None
+    orb_pct: float | None = None
+    drb_pct: float | None = None
+    trb_pct: float | None = None
+    ast_pct: float | None = None
+    stl_pct: float | None = None
+    blk_pct: float | None = None
+    tov_pct: float | None = None
 
 
 class PlayerSeasonStatsResponse(ORMBaseModel):

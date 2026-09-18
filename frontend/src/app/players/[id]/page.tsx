@@ -65,7 +65,28 @@ type CountingSortKey =
   | "pf"
   | "pts";
 
-type AdvancedSortKey = "season" | "team" | "games" | "per" | "ws" | "bpm" | "vorp";
+type AdvancedSortKey =
+  | "season"
+  | "team"
+  | "games"
+  | "per"
+  | "ts_pct"
+  | "usg_pct"
+  | "orb_pct"
+  | "drb_pct"
+  | "trb_pct"
+  | "ast_pct"
+  | "stl_pct"
+  | "blk_pct"
+  | "tov_pct"
+  | "ows"
+  | "dws"
+  | "ws"
+  | "ws_per_48"
+  | "obpm"
+  | "dbpm"
+  | "bpm"
+  | "vorp";
 
 type SeasonSortKey = CountingSortKey | AdvancedSortKey;
 
@@ -96,7 +117,21 @@ const ADVANCED_COLUMNS: Array<{ key: AdvancedSortKey; label: string }> = [
   { key: "team", label: "Tm" },
   { key: "games", label: "G" },
   { key: "per", label: "PER" },
+  { key: "ts_pct", label: "TS%" },
+  { key: "usg_pct", label: "USG%" },
+  { key: "orb_pct", label: "ORB%" },
+  { key: "drb_pct", label: "DRB%" },
+  { key: "trb_pct", label: "TRB%" },
+  { key: "ast_pct", label: "AST%" },
+  { key: "stl_pct", label: "STL%" },
+  { key: "blk_pct", label: "BLK%" },
+  { key: "tov_pct", label: "TOV%" },
+  { key: "ows", label: "OWS" },
+  { key: "dws", label: "DWS" },
   { key: "ws", label: "WS" },
+  { key: "ws_per_48", label: "WS/48" },
+  { key: "obpm", label: "OBPM" },
+  { key: "dbpm", label: "DBPM" },
   { key: "bpm", label: "BPM" },
   { key: "vorp", label: "VORP" },
 ];
@@ -126,13 +161,6 @@ function seasonSortValue(
 ): number | string | null {
   if (key === "season") return row.season?.start_year ?? null;
   if (key === "team") return teamLabel;
-  if (key === "games") return row.games ?? null;
-  if (key === "games_started") return row.games_started ?? null;
-  if (key === "fg_pct") return row.fg_pct ?? null;
-  if (key === "per") return row.per ?? null;
-  if (key === "ws") return row.ws ?? null;
-  if (key === "bpm") return row.bpm ?? null;
-  if (key === "vorp") return row.vorp ?? null;
 
   const raw = (row[key as keyof PlayerSeasonStat] as number | null | undefined) ?? null;
   if (raw == null) return null;
@@ -1008,7 +1036,21 @@ function AdvancedSeasonRow({
       <td className="whitespace-nowrap px-2 py-2">{teamLabel}</td>
       <td className="px-2 py-2 tabular-nums">{fmt(row.games)}</td>
       <td className="px-2 py-2 tabular-nums">{fmt(row.per, 1)}</td>
+      <td className="px-2 py-2 tabular-nums">{pct(row.ts_pct)}</td>
+      <td className="px-2 py-2 tabular-nums">{fmt(row.usg_pct, 1)}</td>
+      <td className="px-2 py-2 tabular-nums">{fmt(row.orb_pct, 1)}</td>
+      <td className="px-2 py-2 tabular-nums">{fmt(row.drb_pct, 1)}</td>
+      <td className="px-2 py-2 tabular-nums">{fmt(row.trb_pct, 1)}</td>
+      <td className="px-2 py-2 tabular-nums">{fmt(row.ast_pct, 1)}</td>
+      <td className="px-2 py-2 tabular-nums">{fmt(row.stl_pct, 1)}</td>
+      <td className="px-2 py-2 tabular-nums">{fmt(row.blk_pct, 1)}</td>
+      <td className="px-2 py-2 tabular-nums">{fmt(row.tov_pct, 1)}</td>
+      <td className="px-2 py-2 tabular-nums">{fmt(row.ows, 1)}</td>
+      <td className="px-2 py-2 tabular-nums">{fmt(row.dws, 1)}</td>
       <td className="px-2 py-2 tabular-nums">{fmt(row.ws, 1)}</td>
+      <td className="px-2 py-2 tabular-nums">{fmt(row.ws_per_48, 3)}</td>
+      <td className="px-2 py-2 tabular-nums">{fmt(row.obpm, 1)}</td>
+      <td className="px-2 py-2 tabular-nums">{fmt(row.dbpm, 1)}</td>
       <td className="px-2 py-2 tabular-nums">{fmt(row.bpm, 1)}</td>
       <td className="px-2 py-2 tabular-nums last:pr-4">{fmt(row.vorp, 1)}</td>
     </tr>
@@ -1026,7 +1068,21 @@ function AdvancedCareerRow({
       <td className="whitespace-nowrap px-2 py-2.5">—</td>
       <td className="px-2 py-2.5 tabular-nums">{fmt(totals.games)}</td>
       <td className="px-2 py-2.5 tabular-nums">{fmt(totals.per, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{pct(totals.ts_pct)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{fmt(totals.usg_pct, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{fmt(totals.orb_pct, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{fmt(totals.drb_pct, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{fmt(totals.trb_pct, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{fmt(totals.ast_pct, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{fmt(totals.stl_pct, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{fmt(totals.blk_pct, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{fmt(totals.tov_pct, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{fmt(totals.ows, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{fmt(totals.dws, 1)}</td>
       <td className="px-2 py-2.5 tabular-nums">{fmt(totals.ws, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{fmt(totals.ws_per_48, 3)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{fmt(totals.obpm, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{fmt(totals.dbpm, 1)}</td>
       <td className="px-2 py-2.5 tabular-nums">{fmt(totals.bpm, 1)}</td>
       <td className="px-2 py-2.5 tabular-nums last:pr-4">{fmt(totals.vorp, 1)}</td>
     </tr>
