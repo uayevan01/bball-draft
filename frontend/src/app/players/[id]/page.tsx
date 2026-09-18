@@ -295,6 +295,96 @@ function coalesceSeasonParts(parts: PlayerSeasonStat[]): PlayerSeasonStat {
   return out;
 }
 
+type PlayerTeamStint = NonNullable<PlayerDetail["team_stints"]>[number];
+
+type StintSummary = {
+  key: string;
+  yearsLabel: string;
+  teamLabel: string;
+  row: PlayerSeasonStat;
+};
+
+function seasonBelongsToStint(row: PlayerSeasonStat, stint: PlayerTeamStint): boolean {
+  if (row.team_id !== stint.team_id) return false;
+  const start = row.season?.start_year;
+  if (start == null) return false;
+  if (start < stint.start_year) return false;
+  // Inclusive of end_year so a mid-season departure still counts that team's split.
+  if (stint.end_year == null) return true;
+  return start <= stint.end_year;
+}
+
+function teamLabelFor(teamId: number, team: Team | null | undefined, teamsById: Record<number, Team>): string {
+  const t = team ?? teamsById[teamId];
+  return t?.abbreviation || t?.name || String(teamId);
+}
+
+function yearsLabelFromSeasonRows(parts: PlayerSeasonStat[], careerMaxStart: number | null): string {
+  const starts = parts
+    .map((p) => p.season?.start_year)
+    .filter((y): y is number => y != null);
+  if (starts.length === 0) return "—";
+  const minStart = Math.min(...starts);
+  const maxStart = Math.max(...starts);
+  const endYear = careerMaxStart != null && maxStart === careerMaxStart ? null : maxStart + 1;
+  return formatStintYears(minStart, endYear);
+}
+
+function buildStintSummaries(
+  stints: PlayerTeamStint[],
+  seasonRows: PlayerSeasonStat[],
+  teamsById: Record<number, Team>,
+): StintSummary[] {
+  const sorted = [...stints].sort((a, b) => a.start_year - b.start_year || a.id - b.id);
+  const used = new Set<number>();
+  const out: StintSummary[] = [];
+  for (const stint of sorted) {
+    const parts = seasonRows.filter((row) => seasonBelongsToStint(row, stint));
+    if (parts.length === 0) continue;
+    for (const part of parts) used.add(part.id);
+    out.push({
+      key: `stint-${stint.id}`,
+      yearsLabel: formatStintYears(stint.start_year, stint.end_year),
+      teamLabel: teamLabelFor(stint.team_id, stint.team, teamsById),
+      row: coalesceSeasonParts(parts),
+    });
+  }
+
+  const leftovers = seasonRows.filter((row) => !used.has(row.id));
+  if (leftovers.length === 0) return out;
+
+  const careerMaxStart = seasonRows.reduce<number | null>((max, row) => {
+    const start = row.season?.start_year;
+    if (start == null) return max;
+    return max == null || start > max ? start : max;
+  }, null);
+
+  const byTeam = new Map<number, PlayerSeasonStat[]>();
+  for (const row of leftovers) {
+    const list = byTeam.get(row.team_id) ?? [];
+    list.push(row);
+    byTeam.set(row.team_id, list);
+  }
+  const extra: StintSummary[] = [];
+  for (const [teamId, parts] of byTeam) {
+    extra.push({
+      key: `stint-extra-${teamId}`,
+      yearsLabel: yearsLabelFromSeasonRows(parts, careerMaxStart),
+      teamLabel: teamLabelFor(teamId, undefined, teamsById),
+      row: coalesceSeasonParts(parts),
+    });
+  }
+  extra.sort((a, b) => a.yearsLabel.localeCompare(b.yearsLabel));
+  return [...out, ...extra];
+}
+
+function footerRowClass(tone: "career" | "stint"): string {
+  if (tone === "career") {
+    return "border-t-2 border-black/15 bg-zinc-50 font-semibold dark:border-white/15 dark:bg-zinc-900/80";
+  }
+  return "border-t border-black/10 bg-zinc-100 font-medium dark:border-white/10 dark:bg-zinc-800/55";
+}
+
 type SeasonDisplayRow = {
   key: string;
   row: PlayerSeasonStat;
@@ -642,6 +732,11 @@ export default function PlayerDetailPage() {
     [stats, advancedSortKey, advancedSortDir, teamsById],
   );
 
+  const stintSummaries = useMemo(
+    () => buildStintSummaries(player?.team_stints ?? [], stats?.rows ?? [], teamsById),
+    [player?.team_stints, stats?.rows, teamsById],
+  );
+
   const awardGroups = useMemo(() => {
     const abbr = (teamId: number | null | undefined) => {
       if (teamId == null) return "—";
@@ -900,6 +995,15 @@ export default function PlayerDetailPage() {
                 {stats?.totals && countingRows.length > 0 ? (
                   <tfoot>
                     <CountingCareerRow totals={stats.totals} view={statsView} />
+                    {stintSummaries.map((stint) => (
+                      <CountingStintRow
+                        key={stint.key}
+                        yearsLabel={stint.yearsLabel}
+                        teamLabel={stint.teamLabel}
+                        row={stint.row}
+                        view={statsView}
+                      />
+                    ))}
                   </tfoot>
                 ) : null}
               </table>
@@ -954,6 +1058,14 @@ export default function PlayerDetailPage() {
                 {stats?.totals && advancedRows.length > 0 ? (
                   <tfoot>
                     <AdvancedCareerRow totals={stats.totals} />
+                    {stintSummaries.map((stint) => (
+                      <AdvancedStintRow
+                        key={stint.key}
+                        yearsLabel={stint.yearsLabel}
+                        teamLabel={stint.teamLabel}
+                        row={stint.row}
+                      />
+                    ))}
                   </tfoot>
                 ) : null}
               </table>
@@ -1263,6 +1375,72 @@ function CountingSeasonRow({
   );
 }
 
+type CountingFooterStats = {
+  games?: number | null;
+  games_started?: number | null;
+  minutes?: number | null;
+  fg?: number | null;
+  fga?: number | null;
+  fg_pct?: number | null;
+  fg3?: number | null;
+  fg3a?: number | null;
+  ft?: number | null;
+  fta?: number | null;
+  orb?: number | null;
+  drb?: number | null;
+  trb?: number | null;
+  ast?: number | null;
+  stl?: number | null;
+  blk?: number | null;
+  tov?: number | null;
+  pf?: number | null;
+  pts?: number | null;
+};
+
+function CountingFooterRow({
+  label,
+  teamLabel,
+  stats,
+  view,
+  tone,
+}: {
+  label: string;
+  teamLabel: string;
+  stats: CountingFooterStats;
+  view: StatsView;
+  tone: "career" | "stint";
+}) {
+  const g = stats.games;
+  const counting = (n: number | null | undefined, digits = 1) =>
+    view === "per_game" ? perGame(n, g, digits) : fmt(n);
+
+  return (
+    <tr className={footerRowClass(tone)}>
+      <td className="whitespace-nowrap px-2 py-2.5 first:pl-4">{label}</td>
+      <td className="whitespace-nowrap px-2 py-2.5">{teamLabel}</td>
+      <td className="px-2 py-2.5 tabular-nums">{fmt(stats.games)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{fmt(stats.games_started)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{counting(stats.minutes, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{counting(stats.fg, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{counting(stats.fga, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{pct(stats.fg_pct)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{counting(stats.fg3, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{counting(stats.fg3a, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{counting(stats.ft, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{counting(stats.fta, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{counting(stats.orb, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{counting(stats.drb, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{counting(stats.trb, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{counting(stats.ast, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{counting(stats.stl, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{counting(stats.blk, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{counting(stats.tov, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{counting(stats.pf, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums last:pr-4">{counting(stats.pts, 1)}</td>
+    </tr>
+  );
+}
+
 function CountingCareerRow({
   totals,
   view,
@@ -1270,34 +1448,22 @@ function CountingCareerRow({
   totals: NonNullable<PlayerSeasonStatsResponse["totals"]>;
   view: StatsView;
 }) {
-  const g = totals.games;
-  const counting = (n: number | null | undefined, digits = 1) =>
-    view === "per_game" ? perGame(n, g, digits) : fmt(n);
+  return <CountingFooterRow label="Career" teamLabel="—" stats={totals} view={view} tone="career" />;
+}
 
+function CountingStintRow({
+  yearsLabel,
+  teamLabel,
+  row,
+  view,
+}: {
+  yearsLabel: string;
+  teamLabel: string;
+  row: PlayerSeasonStat;
+  view: StatsView;
+}) {
   return (
-    <tr className="border-t-2 border-black/15 bg-zinc-50 font-semibold dark:border-white/15 dark:bg-zinc-900/80">
-      <td className="whitespace-nowrap px-2 py-2.5 first:pl-4">Career</td>
-      <td className="whitespace-nowrap px-2 py-2.5">—</td>
-      <td className="px-2 py-2.5 tabular-nums">{fmt(totals.games)}</td>
-      <td className="px-2 py-2.5 tabular-nums">{fmt(totals.games_started)}</td>
-      <td className="px-2 py-2.5 tabular-nums">{counting(totals.minutes, 1)}</td>
-      <td className="px-2 py-2.5 tabular-nums">{counting(totals.fg, 1)}</td>
-      <td className="px-2 py-2.5 tabular-nums">{counting(totals.fga, 1)}</td>
-      <td className="px-2 py-2.5 tabular-nums">{pct(totals.fg_pct)}</td>
-      <td className="px-2 py-2.5 tabular-nums">{counting(totals.fg3, 1)}</td>
-      <td className="px-2 py-2.5 tabular-nums">{counting(totals.fg3a, 1)}</td>
-      <td className="px-2 py-2.5 tabular-nums">{counting(totals.ft, 1)}</td>
-      <td className="px-2 py-2.5 tabular-nums">{counting(totals.fta, 1)}</td>
-      <td className="px-2 py-2.5 tabular-nums">{counting(totals.orb, 1)}</td>
-      <td className="px-2 py-2.5 tabular-nums">{counting(totals.drb, 1)}</td>
-      <td className="px-2 py-2.5 tabular-nums">{counting(totals.trb, 1)}</td>
-      <td className="px-2 py-2.5 tabular-nums">{counting(totals.ast, 1)}</td>
-      <td className="px-2 py-2.5 tabular-nums">{counting(totals.stl, 1)}</td>
-      <td className="px-2 py-2.5 tabular-nums">{counting(totals.blk, 1)}</td>
-      <td className="px-2 py-2.5 tabular-nums">{counting(totals.tov, 1)}</td>
-      <td className="px-2 py-2.5 tabular-nums">{counting(totals.pf, 1)}</td>
-      <td className="px-2 py-2.5 tabular-nums last:pr-4">{counting(totals.pts, 1)}</td>
-    </tr>
+    <CountingFooterRow label={yearsLabel} teamLabel={teamLabel} stats={row} view={view} tone="stint" />
   );
 }
 
@@ -1357,34 +1523,82 @@ function AdvancedSeasonRow({
   );
 }
 
+type AdvancedFooterStats = {
+  games?: number | null;
+  per?: number | null;
+  ts_pct?: number | null;
+  usg_pct?: number | null;
+  orb_pct?: number | null;
+  drb_pct?: number | null;
+  trb_pct?: number | null;
+  ast_pct?: number | null;
+  stl_pct?: number | null;
+  blk_pct?: number | null;
+  tov_pct?: number | null;
+  ows?: number | null;
+  dws?: number | null;
+  ws?: number | null;
+  ws_per_48?: number | null;
+  obpm?: number | null;
+  dbpm?: number | null;
+  bpm?: number | null;
+  vorp?: number | null;
+};
+
+function AdvancedFooterRow({
+  label,
+  teamLabel,
+  stats,
+  tone,
+}: {
+  label: string;
+  teamLabel: string;
+  stats: AdvancedFooterStats;
+  tone: "career" | "stint";
+}) {
+  return (
+    <tr className={footerRowClass(tone)}>
+      <td className="whitespace-nowrap px-2 py-2.5 first:pl-4">{label}</td>
+      <td className="whitespace-nowrap px-2 py-2.5">{teamLabel}</td>
+      <td className="px-2 py-2.5 tabular-nums">{fmt(stats.games)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{fmt(stats.per, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{pct(stats.ts_pct)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{fmt(stats.usg_pct, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{fmt(stats.orb_pct, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{fmt(stats.drb_pct, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{fmt(stats.trb_pct, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{fmt(stats.ast_pct, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{fmt(stats.stl_pct, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{fmt(stats.blk_pct, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{fmt(stats.tov_pct, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{fmt(stats.ows, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{fmt(stats.dws, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{fmt(stats.ws, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{fmt(stats.ws_per_48, 3)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{fmt(stats.obpm, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{fmt(stats.dbpm, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{fmt(stats.bpm, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums last:pr-4">{fmt(stats.vorp, 1)}</td>
+    </tr>
+  );
+}
+
 function AdvancedCareerRow({
   totals,
 }: {
   totals: NonNullable<PlayerSeasonStatsResponse["totals"]>;
 }) {
-  return (
-    <tr className="border-t-2 border-black/15 bg-zinc-50 font-semibold dark:border-white/15 dark:bg-zinc-900/80">
-      <td className="whitespace-nowrap px-2 py-2.5 first:pl-4">Career</td>
-      <td className="whitespace-nowrap px-2 py-2.5">—</td>
-      <td className="px-2 py-2.5 tabular-nums">{fmt(totals.games)}</td>
-      <td className="px-2 py-2.5 tabular-nums">{fmt(totals.per, 1)}</td>
-      <td className="px-2 py-2.5 tabular-nums">{pct(totals.ts_pct)}</td>
-      <td className="px-2 py-2.5 tabular-nums">{fmt(totals.usg_pct, 1)}</td>
-      <td className="px-2 py-2.5 tabular-nums">{fmt(totals.orb_pct, 1)}</td>
-      <td className="px-2 py-2.5 tabular-nums">{fmt(totals.drb_pct, 1)}</td>
-      <td className="px-2 py-2.5 tabular-nums">{fmt(totals.trb_pct, 1)}</td>
-      <td className="px-2 py-2.5 tabular-nums">{fmt(totals.ast_pct, 1)}</td>
-      <td className="px-2 py-2.5 tabular-nums">{fmt(totals.stl_pct, 1)}</td>
-      <td className="px-2 py-2.5 tabular-nums">{fmt(totals.blk_pct, 1)}</td>
-      <td className="px-2 py-2.5 tabular-nums">{fmt(totals.tov_pct, 1)}</td>
-      <td className="px-2 py-2.5 tabular-nums">{fmt(totals.ows, 1)}</td>
-      <td className="px-2 py-2.5 tabular-nums">{fmt(totals.dws, 1)}</td>
-      <td className="px-2 py-2.5 tabular-nums">{fmt(totals.ws, 1)}</td>
-      <td className="px-2 py-2.5 tabular-nums">{fmt(totals.ws_per_48, 3)}</td>
-      <td className="px-2 py-2.5 tabular-nums">{fmt(totals.obpm, 1)}</td>
-      <td className="px-2 py-2.5 tabular-nums">{fmt(totals.dbpm, 1)}</td>
-      <td className="px-2 py-2.5 tabular-nums">{fmt(totals.bpm, 1)}</td>
-      <td className="px-2 py-2.5 tabular-nums last:pr-4">{fmt(totals.vorp, 1)}</td>
-    </tr>
-  );
+  return <AdvancedFooterRow label="Career" teamLabel="—" stats={totals} tone="career" />;
+}
+
+function AdvancedStintRow({
+  yearsLabel,
+  teamLabel,
+  row,
+}: {
+  yearsLabel: string;
+  teamLabel: string;
+  row: PlayerSeasonStat;
+}) {
+  return <AdvancedFooterRow label={yearsLabel} teamLabel={teamLabel} stats={row} tone="stint" />;
 }

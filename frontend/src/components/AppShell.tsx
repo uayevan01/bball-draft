@@ -3,7 +3,7 @@ import { UserButton } from "@clerk/nextjs";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen overflow-x-hidden bg-zinc-50 text-zinc-950 dark:bg-zinc-950 dark:text-zinc-50">
+    <div className="min-h-screen overflow-x-clip bg-zinc-50 text-zinc-950 dark:bg-zinc-950 dark:text-zinc-50">
       <header className="border-b border-black/10 dark:border-white/10 dark:bg-zinc-950/60">
         <div className="mx-auto flex items-center justify-between gap-3 px-4 py-3 sm:px-6 sm:py-4">
           <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-4">
