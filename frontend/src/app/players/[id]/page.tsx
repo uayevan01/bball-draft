@@ -57,6 +57,8 @@ type CountingSortKey =
   | "fg3a"
   | "ft"
   | "fta"
+  | "orb"
+  | "drb"
   | "trb"
   | "ast"
   | "stl"
@@ -103,6 +105,8 @@ const COUNTING_COLUMNS: Array<{ key: CountingSortKey; label: string }> = [
   { key: "fg3a", label: "3PA" },
   { key: "ft", label: "FT" },
   { key: "fta", label: "FTA" },
+  { key: "orb", label: "ORB" },
+  { key: "drb", label: "DRB" },
   { key: "trb", label: "TRB" },
   { key: "ast", label: "AST" },
   { key: "stl", label: "STL" },
@@ -1165,6 +1169,8 @@ function CountingSeasonRow({
       <td className="px-2 py-2 tabular-nums">{counting(row.fg3a, 1)}</td>
       <td className="px-2 py-2 tabular-nums">{counting(row.ft, 1)}</td>
       <td className="px-2 py-2 tabular-nums">{counting(row.fta, 1)}</td>
+      <td className="px-2 py-2 tabular-nums">{counting(row.orb, 1)}</td>
+      <td className="px-2 py-2 tabular-nums">{counting(row.drb, 1)}</td>
       <td className="px-2 py-2 tabular-nums">{counting(row.trb, 1)}</td>
       <td className="px-2 py-2 tabular-nums">{counting(row.ast, 1)}</td>
       <td className="px-2 py-2 tabular-nums">{counting(row.stl, 1)}</td>
