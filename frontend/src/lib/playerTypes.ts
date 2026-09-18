@@ -130,6 +130,8 @@ export type PlayerSeasonStatsAggregate = {
   fg3a?: number | null;
   ft?: number | null;
   fta?: number | null;
+  orb?: number | null;
+  drb?: number | null;
   trb?: number | null;
   ast?: number | null;
   stl?: number | null;

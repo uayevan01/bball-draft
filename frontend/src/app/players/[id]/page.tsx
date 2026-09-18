@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useAuth } from "@clerk/nextjs";
 import { useParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 
 import { AppShell } from "@/components/AppShell";
@@ -148,6 +148,8 @@ const PER_GAME_SORT_KEYS = new Set<SeasonSortKey>([
   "fg3a",
   "ft",
   "fta",
+  "orb",
+  "drb",
   "trb",
   "ast",
   "stl",
@@ -569,6 +571,9 @@ export default function PlayerDetailPage() {
   const [advancedSortKey, setAdvancedSortKey] = useState<AdvancedSortKey>("season");
   const [advancedSortDir, setAdvancedSortDir] = useState<"asc" | "desc">("asc");
   const [seasonHover, setSeasonHover] = useState<SeasonHover | null>(null);
+  const stickyBarRef = useRef<HTMLDivElement>(null);
+  const advancedHeadingRef = useRef<HTMLHeadingElement>(null);
+  const [stickySection, setStickySection] = useState<"stats" | "advanced">("stats");
 
   useEffect(() => {
     if (!Number.isFinite(playerId)) {
@@ -665,6 +670,28 @@ export default function PlayerDetailPage() {
   }
 
   const hideSeasonHover = () => setSeasonHover(null);
+
+  useEffect(() => {
+    function updateStickySection() {
+      const sticky = stickyBarRef.current;
+      const advanced = advancedHeadingRef.current;
+      if (!sticky || !advanced) {
+        setStickySection("stats");
+        return;
+      }
+      const stickyBottom = sticky.getBoundingClientRect().bottom;
+      const advancedTop = advanced.getBoundingClientRect().top;
+      setStickySection(advancedTop <= stickyBottom + 1 ? "advanced" : "stats");
+    }
+
+    updateStickySection();
+    window.addEventListener("scroll", updateStickySection, { passive: true });
+    window.addEventListener("resize", updateStickySection);
+    return () => {
+      window.removeEventListener("scroll", updateStickySection);
+      window.removeEventListener("resize", updateStickySection);
+    };
+  }, [player, seasonScope, countingRows.length, advancedRows.length]);
 
   function toggleCountingSort(key: CountingSortKey) {
     if (countingSortKey === key) {
@@ -791,8 +818,13 @@ export default function PlayerDetailPage() {
           </section>
 
           <section>
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold tracking-tight">{scopeLabel} stats</h2>
+            <div
+              ref={stickyBarRef}
+              className="sticky top-0 z-20 -mx-6 mb-3 flex flex-wrap items-center justify-between gap-3 bg-zinc-50/95 px-6 py-3 backdrop-blur dark:bg-zinc-950/95"
+            >
+              <h2 className="text-lg font-semibold tracking-tight">
+                {stickySection === "advanced" ? `${scopeLabel} advanced` : `${scopeLabel} stats`}
+              </h2>
               <div className="flex flex-wrap items-center gap-2">
                 <div className="inline-flex rounded-full border border-black/10 bg-white p-1 text-sm dark:border-white/10 dark:bg-black">
                   <ScopeButton
@@ -822,7 +854,7 @@ export default function PlayerDetailPage() {
                 </div>
               </div>
             </div>
-            <div className="mt-3 overflow-x-auto rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-zinc-900/40">
+            <div className="overflow-x-auto rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-zinc-900/40">
               <table className="min-w-full text-left text-xs sm:text-sm">
                 <thead className="border-b border-black/10 text-[11px] uppercase tracking-wide text-zinc-500 dark:border-white/10">
                   <tr>
@@ -867,10 +899,16 @@ export default function PlayerDetailPage() {
                 ) : null}
               </table>
             </div>
-          </section>
 
-          <section>
-            <h2 className="text-lg font-semibold tracking-tight">{scopeLabel} advanced</h2>
+            <h2
+              ref={advancedHeadingRef}
+              className={[
+                "mt-8 text-lg font-semibold tracking-tight",
+                stickySection === "advanced" ? "invisible" : "",
+              ].join(" ")}
+            >
+              {scopeLabel} advanced
+            </h2>
             <div className="mt-3 overflow-x-auto rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-zinc-900/40">
               <table className="min-w-full text-left text-xs sm:text-sm">
                 <thead className="border-b border-black/10 text-[11px] uppercase tracking-wide text-zinc-500 dark:border-white/10">
@@ -1207,6 +1245,8 @@ function CountingCareerRow({
       <td className="px-2 py-2.5 tabular-nums">{counting(totals.fg3a, 1)}</td>
       <td className="px-2 py-2.5 tabular-nums">{counting(totals.ft, 1)}</td>
       <td className="px-2 py-2.5 tabular-nums">{counting(totals.fta, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{counting(totals.orb, 1)}</td>
+      <td className="px-2 py-2.5 tabular-nums">{counting(totals.drb, 1)}</td>
       <td className="px-2 py-2.5 tabular-nums">{counting(totals.trb, 1)}</td>
       <td className="px-2 py-2.5 tabular-nums">{counting(totals.ast, 1)}</td>
       <td className="px-2 py-2.5 tabular-nums">{counting(totals.stl, 1)}</td>
