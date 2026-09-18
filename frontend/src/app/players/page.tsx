@@ -166,7 +166,7 @@ function SortableTh({
 }) {
   const active = activeKey === sortKey;
   return (
-    <th className="px-4 py-3 font-medium">
+    <th className="whitespace-nowrap px-2 py-2.5 font-medium sm:px-4 sm:py-3">
       <button
         type="button"
         onClick={() => onSort(sortKey)}
@@ -442,7 +442,7 @@ export default function PlayersPage() {
   const colCount = 4 + extraColumns.length;
 
   const inputClass =
-    "h-10 rounded-xl border border-black/10 bg-white px-3 text-sm outline-none focus:border-zinc-400 dark:border-white/10 dark:bg-black dark:focus:border-zinc-500";
+    "h-10 w-full min-w-0 rounded-xl border border-black/10 bg-white px-3 text-sm outline-none focus:border-zinc-400 dark:border-white/10 dark:bg-black dark:focus:border-zinc-500";
 
   function setStatBound(key: StatKey, side: "min" | "max", value: string) {
     setStatBounds((prev) => ({ ...prev, [key]: { ...prev[key], [side]: value } }));
@@ -476,7 +476,7 @@ export default function PlayersPage() {
         </div>
       </div>
 
-      <div className="mt-6 grid gap-3 rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-900/40 md:grid-cols-2 xl:grid-cols-5">
+      <div className="mt-6 grid gap-3 rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-900/40 sm:grid-cols-2 xl:grid-cols-5">
         <label className="grid gap-1 text-xs font-medium text-zinc-600 dark:text-zinc-400">
           Name
           <input
@@ -508,26 +508,28 @@ export default function PlayersPage() {
             ))}
           </select>
         </label>
-        <label className="grid gap-1 text-xs font-medium text-zinc-600 dark:text-zinc-400">
-          Years from
-          <input
-            className={inputClass}
-            inputMode="numeric"
-            value={activeFrom}
-            onChange={(e) => setActiveFrom(e.target.value)}
-            placeholder="no min"
-          />
-        </label>
-        <label className="grid gap-1 text-xs font-medium text-zinc-600 dark:text-zinc-400">
-          Years to
-          <input
-            className={inputClass}
-            inputMode="numeric"
-            value={activeTo}
-            onChange={(e) => setActiveTo(e.target.value)}
-            placeholder="no max"
-          />
-        </label>
+        <div className="grid grid-cols-2 gap-3 sm:contents">
+          <label className="grid gap-1 text-xs font-medium text-zinc-600 dark:text-zinc-400">
+            Years from
+            <input
+              className={inputClass}
+              inputMode="numeric"
+              value={activeFrom}
+              onChange={(e) => setActiveFrom(e.target.value)}
+              placeholder="no min"
+            />
+          </label>
+          <label className="grid gap-1 text-xs font-medium text-zinc-600 dark:text-zinc-400">
+            Years to
+            <input
+              className={inputClass}
+              inputMode="numeric"
+              value={activeTo}
+              onChange={(e) => setActiveTo(e.target.value)}
+              placeholder="no max"
+            />
+          </label>
+        </div>
       </div>
 
       <div className="mt-3 grid gap-3">
@@ -537,16 +539,16 @@ export default function PlayersPage() {
           onToggle={() => setAdvancedOpen((v) => !v)}
           badge={advancedCount || undefined}
         >
-          <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
             <p className="text-sm text-zinc-600 dark:text-zinc-400">
               Filter by career regular-season counting stats. Columns appear in the table only for stats you set.
             </p>
-            <div className="inline-flex rounded-full border border-black/10 bg-white p-1 text-sm dark:border-white/10 dark:bg-black">
+            <div className="inline-flex w-full rounded-full border border-black/10 bg-white p-1 text-sm sm:w-auto dark:border-white/10 dark:bg-black">
               <button
                 type="button"
                 onClick={() => setStatMode("totals")}
                 className={[
-                  "h-9 rounded-full px-4 font-semibold",
+                  "h-9 flex-1 rounded-full px-3 font-semibold sm:flex-none sm:px-4",
                   statMode === "totals"
                     ? "bg-zinc-950 text-white dark:bg-white dark:text-black"
                     : "text-zinc-700 hover:text-zinc-950 dark:text-zinc-300 dark:hover:text-white",
@@ -558,7 +560,7 @@ export default function PlayersPage() {
                 type="button"
                 onClick={() => setStatMode("per_game")}
                 className={[
-                  "h-9 rounded-full px-4 font-semibold",
+                  "h-9 flex-1 rounded-full px-3 font-semibold sm:flex-none sm:px-4",
                   statMode === "per_game"
                     ? "bg-zinc-950 text-white dark:bg-white dark:text-black"
                     : "text-zinc-700 hover:text-zinc-950 dark:text-zinc-300 dark:hover:text-white",
@@ -569,7 +571,7 @@ export default function PlayersPage() {
             </div>
           </div>
           <div className="mt-4 overflow-x-auto">
-            <table className="min-w-lg text-left text-sm">
+            <table className="w-full min-w-0 text-left text-sm">
               <thead className="text-xs uppercase tracking-wide text-zinc-500">
                 <tr>
                   <th className="py-1 pr-3 font-medium">Stat</th>
@@ -588,7 +590,7 @@ export default function PlayersPage() {
                     </td>
                     <td className="py-1.5 pr-3">
                       <input
-                        className={`${inputClass} w-28`}
+                        className={inputClass}
                         inputMode="decimal"
                         value={statBounds[field.key].min}
                         onChange={(e) => setStatBound(field.key, "min", e.target.value)}
@@ -597,7 +599,7 @@ export default function PlayersPage() {
                     </td>
                     <td className="py-1.5">
                       <input
-                        className={`${inputClass} w-28`}
+                        className={inputClass}
                         inputMode="decimal"
                         value={statBounds[field.key].max}
                         onChange={(e) => setStatBound(field.key, "max", e.target.value)}
@@ -675,7 +677,90 @@ export default function PlayersPage() {
         </div>
       ) : null}
 
-      <div className="mt-6 overflow-x-auto rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-zinc-900/40">
+      <div className="mt-4 flex items-center gap-2 md:hidden">
+        <label className="shrink-0 text-xs font-medium text-zinc-500">Sort</label>
+        <select
+          className={inputClass}
+          value={sortBy}
+          onChange={(e) => {
+            const next = e.target.value as SortKey;
+            setSortBy(next);
+            setSortDir(defaultSortDir(next));
+          }}
+        >
+          <option value="name">Player</option>
+          <option value="position">Pos</option>
+          <option value="team">Team</option>
+          <option value="years">Years</option>
+          {extraColumns.map((col) => (
+            <option key={col.key} value={col.key}>
+              {col.label}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
+          className="h-10 shrink-0 rounded-xl border border-black/10 px-3 text-sm font-semibold dark:border-white/10"
+          aria-label={sortDir === "asc" ? "Sort ascending" : "Sort descending"}
+        >
+          {sortDir === "asc" ? "↑" : "↓"}
+        </button>
+      </div>
+
+      <div className="mt-4 grid gap-2 md:hidden">
+        {loading ? (
+          <div className="rounded-xl border border-black/10 bg-white px-4 py-8 text-sm text-zinc-500 dark:border-white/10 dark:bg-zinc-900/40">
+            Loading…
+          </div>
+        ) : players.length === 0 ? (
+          <div className="rounded-xl border border-black/10 bg-white px-4 py-8 text-sm text-zinc-500 dark:border-white/10 dark:bg-zinc-900/40">
+            No players matched these filters.
+          </div>
+        ) : (
+          players.map((p) => (
+            <Link
+              key={p.id}
+              href={`/players/${p.id}`}
+              className="flex items-center gap-3 rounded-xl border border-black/10 bg-white px-3 py-3 dark:border-white/10 dark:bg-zinc-900/40"
+            >
+              {p.image_url ? (
+                <Image
+                  src={p.image_url}
+                  alt=""
+                  width={40}
+                  height={40}
+                  className="h-10 w-10 shrink-0 rounded-full object-cover bg-zinc-200 dark:bg-zinc-800"
+                  unoptimized
+                />
+              ) : (
+                <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-zinc-200 text-xs font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                  {p.name.slice(0, 1)}
+                </span>
+              )}
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-medium">{p.name}</span>
+                <span className="mt-0.5 block truncate text-xs text-zinc-500">
+                  {[p.position || null, teamLabel(p) !== "—" ? teamLabel(p) : null, formatCareerYears(p.career_start_year, p.retirement_year)]
+                    .filter((v) => v && v !== "—")
+                    .join(" · ")}
+                </span>
+                {extraColumns.length > 0 ? (
+                  <span className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs tabular-nums text-zinc-600 dark:text-zinc-300">
+                    {extraColumns.map((col) => (
+                      <span key={col.key}>
+                        {col.label} {col.render(p)}
+                      </span>
+                    ))}
+                  </span>
+                ) : null}
+              </span>
+            </Link>
+          ))
+        )}
+      </div>
+
+      <div className="mt-6 hidden min-w-0 overflow-x-auto rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-zinc-900/40 md:block">
         <table className="min-w-full text-left text-sm">
           <thead className="border-b border-black/10 text-xs uppercase tracking-wide text-zinc-500 dark:border-white/10 dark:text-zinc-400">
             <tr>
@@ -714,7 +799,7 @@ export default function PlayersPage() {
                   key={p.id}
                   className="border-t border-black/5 hover:bg-zinc-50 dark:border-white/5 dark:hover:bg-zinc-900"
                 >
-                  <td className="px-4 py-3">
+                  <td className="px-2 py-3 sm:px-4">
                     <Link href={`/players/${p.id}`} className="flex items-center gap-3 font-medium hover:underline">
                       {p.image_url ? (
                         <Image
@@ -733,13 +818,13 @@ export default function PlayersPage() {
                       <span>{p.name}</span>
                     </Link>
                   </td>
-                  <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">{p.position || "—"}</td>
-                  <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">{teamLabel(p)}</td>
-                  <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">
+                  <td className="px-2 py-3 text-zinc-600 sm:px-4 dark:text-zinc-300">{p.position || "—"}</td>
+                  <td className="px-2 py-3 text-zinc-600 sm:px-4 dark:text-zinc-300">{teamLabel(p)}</td>
+                  <td className="px-2 py-3 text-zinc-600 sm:px-4 dark:text-zinc-300">
                     {formatCareerYears(p.career_start_year, p.retirement_year)}
                   </td>
                   {extraColumns.map((col) => (
-                    <td key={col.key} className="px-4 py-3 tabular-nums text-zinc-600 dark:text-zinc-300">
+                    <td key={col.key} className="px-2 py-3 tabular-nums text-zinc-600 sm:px-4 dark:text-zinc-300">
                       {col.render(p)}
                     </td>
                   ))}
@@ -755,18 +840,18 @@ export default function PlayersPage() {
           type="button"
           disabled={offset === 0 || loading}
           onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
-          className="h-10 rounded-full border border-black/10 px-4 text-sm font-semibold disabled:opacity-40 dark:border-white/10"
+          className="h-10 rounded-full border border-black/10 px-3 text-sm font-semibold disabled:opacity-40 sm:px-4 dark:border-white/10"
         >
           Previous
         </button>
-        <div className="text-sm text-zinc-500">
+        <div className="text-center text-xs text-zinc-500 sm:text-sm">
           Showing {players.length ? offset + 1 : 0}–{offset + players.length}
         </div>
         <button
           type="button"
           disabled={players.length < PAGE_SIZE || loading}
           onClick={() => setOffset((o) => o + PAGE_SIZE)}
-          className="h-10 rounded-full border border-black/10 px-4 text-sm font-semibold disabled:opacity-40 dark:border-white/10"
+          className="h-10 rounded-full border border-black/10 px-3 text-sm font-semibold disabled:opacity-40 sm:px-4 dark:border-white/10"
         >
           Next
         </button>

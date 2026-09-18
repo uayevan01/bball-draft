@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useAuth } from "@clerk/nextjs";
 import { useParams } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 
 import { AppShell } from "@/components/AppShell";
@@ -727,25 +727,25 @@ export default function PlayerDetailPage() {
       ) : null}
 
       {player ? (
-        <div className="grid gap-8">
-          <section className="flex flex-wrap items-start gap-5 rounded-xl border border-black/10 bg-white p-5 dark:border-white/10 dark:bg-zinc-900/40">
+        <div className="grid min-w-0 gap-8">
+          <section className="flex flex-wrap items-start gap-4 rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-900/40 sm:gap-5 sm:p-5">
             {player.image_url ? (
               <Image
                 src={player.image_url}
                 alt=""
                 width={120}
                 height={120}
-                className="h-28 w-28 rounded-xl object-cover bg-zinc-200 dark:bg-zinc-800"
+                className="h-20 w-20 rounded-xl object-cover bg-zinc-200 sm:h-28 sm:w-28 dark:bg-zinc-800"
                 unoptimized
               />
             ) : (
-              <div className="flex h-28 w-28 items-center justify-center rounded-xl bg-zinc-200 text-2xl font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+              <div className="flex h-20 w-20 items-center justify-center rounded-xl bg-zinc-200 text-2xl font-semibold text-zinc-600 sm:h-28 sm:w-28 dark:bg-zinc-800 dark:text-zinc-300">
                 {player.name.slice(0, 1)}
               </div>
             )}
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-3xl font-semibold tracking-tight">{player.name}</h1>
+                <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{player.name}</h1>
                 {player.hall_of_fame ? (
                   <span className="rounded-full bg-amber-500/15 px-2.5 py-0.5 text-xs font-semibold text-amber-800 dark:text-amber-300">
                     Hall of Fame
@@ -817,18 +817,23 @@ export default function PlayerDetailPage() {
             )}
           </section>
 
-          <section>
+          <section className="min-w-0">
             <div
               ref={stickyBarRef}
-              className="sticky top-0 z-20 -mx-6 mb-3 flex flex-wrap items-center justify-between gap-3 bg-zinc-50/95 px-6 py-3 backdrop-blur dark:bg-zinc-950/95"
+              className="sticky top-0 z-20 -mx-4 mb-3 flex flex-col gap-2 bg-zinc-50/95 px-4 py-2 backdrop-blur sm:-mx-6 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:px-6 sm:py-3 dark:bg-zinc-950/95"
             >
-              <h2 className="text-lg font-semibold tracking-tight">
+              <h2 className="text-base font-semibold tracking-tight sm:text-lg">
                 {stickySection === "advanced" ? `${scopeLabel} advanced` : `${scopeLabel} stats`}
               </h2>
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="inline-flex rounded-full border border-black/10 bg-white p-1 text-sm dark:border-white/10 dark:bg-black">
+              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                <div className="inline-flex rounded-full border border-black/10 bg-white p-0.5 text-xs sm:p-1 sm:text-sm dark:border-white/10 dark:bg-black">
                   <ScopeButton
-                    label="Regular season"
+                    label={
+                      <>
+                        <span className="sm:hidden">Regular</span>
+                        <span className="hidden sm:inline">Regular season</span>
+                      </>
+                    }
                     active={seasonScope === "regular"}
                     onClick={() => setSeasonScope("regular")}
                   />
@@ -840,7 +845,7 @@ export default function PlayerDetailPage() {
                     onClick={() => setSeasonScope("postseason")}
                   />
                 </div>
-                <div className="inline-flex rounded-full border border-black/10 bg-white p-1 text-sm dark:border-white/10 dark:bg-black">
+                <div className="inline-flex rounded-full border border-black/10 bg-white p-0.5 text-xs sm:p-1 sm:text-sm dark:border-white/10 dark:bg-black">
                   <ScopeButton
                     label="Per game"
                     active={statsView === "per_game"}
@@ -854,7 +859,7 @@ export default function PlayerDetailPage() {
                 </div>
               </div>
             </div>
-            <div className="overflow-x-auto rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-zinc-900/40">
+            <div className="min-w-0 overflow-x-auto overscroll-x-contain rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-zinc-900/40">
               <table className="min-w-full text-left text-xs sm:text-sm">
                 <thead className="border-b border-black/10 text-[11px] uppercase tracking-wide text-zinc-500 dark:border-white/10">
                   <tr>
@@ -909,7 +914,7 @@ export default function PlayerDetailPage() {
             >
               {scopeLabel} advanced
             </h2>
-            <div className="mt-3 overflow-x-auto rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-zinc-900/40">
+            <div className="mt-3 min-w-0 overflow-x-auto overscroll-x-contain rounded-xl border border-black/10 bg-white dark:border-white/10 dark:bg-zinc-900/40">
               <table className="min-w-full text-left text-xs sm:text-sm">
                 <thead className="border-b border-black/10 text-[11px] uppercase tracking-wide text-zinc-500 dark:border-white/10">
                   <tr>
@@ -1073,7 +1078,7 @@ function ScopeButton({
   title,
   onClick,
 }: {
-  label: string;
+  label: ReactNode;
   active: boolean;
   disabled?: boolean;
   title?: string;
@@ -1086,7 +1091,7 @@ function ScopeButton({
       disabled={disabled}
       title={title}
       className={[
-        "h-9 rounded-full px-4 font-semibold",
+        "h-8 rounded-full px-2.5 font-semibold sm:h-9 sm:px-4",
         active
           ? "bg-zinc-950 text-white dark:bg-white dark:text-black"
           : "text-zinc-700 hover:text-zinc-950 dark:text-zinc-300 dark:hover:text-white",
