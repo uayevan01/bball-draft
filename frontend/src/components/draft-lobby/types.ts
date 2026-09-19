@@ -1,3 +1,5 @@
+import type { PlayerAwardCounts, PlayerCareerStats } from "@/lib/playerTypes";
+
 export type DraftPickWs = {
   pick_number: number;
   role: "host" | "guest";
@@ -53,15 +55,26 @@ export type SpinPreviewTeam = {
   logo_url?: string | null;
 };
 
-export type PlayerSearchResult = { id: number; name: string; image_url?: string | null };
+export type PlayerSearchResult = {
+  id: number;
+  name: string;
+  image_url?: string | null;
+  hall_of_fame?: boolean;
+  career_stats?: PlayerCareerStats | null;
+  award_counts?: PlayerAwardCounts | null;
+};
 
 export type PlayerDetail = {
   id: number;
   name: string;
   image_url?: string | null;
   position?: string | null;
+  hall_of_fame?: boolean;
   retirement_year?: number | null;
   coalesced_team_stint_count?: number | null;
+  career_stats?: PlayerCareerStats | null;
+  playoff_stats?: PlayerCareerStats | null;
+  award_counts?: PlayerAwardCounts | null;
   team_stints?: Array<{
     id: number;
     team_id: number;

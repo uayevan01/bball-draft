@@ -7,11 +7,12 @@ import { useAuth } from "@clerk/nextjs";
 import { useDraftSocket } from "@/hooks/useDraftSocket";
 import { useTurnTabIndicator } from "@/hooks/useTurnTabIndicator";
 import { backendGet, backendPost } from "@/lib/backendClient";
-import { unwrapPlayerList } from "@/lib/playerTypes";
+import { unwrapPlayerList, type PlayerAward, type PlayerSeasonStatsResponse } from "@/lib/playerTypes";
 import type { Draft } from "@/lib/types";
 import type { DraftRules } from "@/lib/draftRules";
 import { DraftLobbyHeader } from "@/components/draft-lobby/DraftLobbyHeader";
 import { DraftSideColumn } from "@/components/draft-lobby/DraftSideColumn";
+import { awardCountsFromRows, countingTotalsFromAggregate } from "@/components/draft-lobby/DraftPlayerStats";
 import { HostSettingsModal } from "@/components/draft-lobby/HostSettingsModal";
 import { MainInfoCard } from "@/components/draft-lobby/MainInfoCard";
 import { PickCard } from "@/components/draft-lobby/PickCard";
@@ -723,6 +724,22 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
     try {
       const token = await getToken().catch(() => null);
       const d = await backendGet<PlayerDetail>(`/players/${playerId}/details`, token);
+      if (d.career_stats == null && d.award_counts == null) {
+        const [regular, postseason, awards] = await Promise.all([
+          backendGet<PlayerSeasonStatsResponse>(
+            `/players/${playerId}/stats?aggregate=true&season_type=regular`,
+            token,
+          ),
+          backendGet<PlayerSeasonStatsResponse>(
+            `/players/${playerId}/stats?aggregate=true&season_type=postseason`,
+            token,
+          ),
+          backendGet<PlayerAward[]>(`/players/${playerId}/awards`, token).catch(() => [] as PlayerAward[]),
+        ]);
+        d.career_stats = countingTotalsFromAggregate(regular.totals);
+        d.playoff_stats = countingTotalsFromAggregate(postseason.totals);
+        d.award_counts = awardCountsFromRows(awards);
+      }
       setDetailsByPlayerId((prev) => ({ ...prev, [playerId]: d }));
     } catch {
       // ignore (expanded UI will show "no details")

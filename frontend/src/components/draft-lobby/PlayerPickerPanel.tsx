@@ -5,8 +5,21 @@ import Image from "next/image";
 import { useAuth } from "@clerk/nextjs";
 
 import { backendGet } from "@/lib/backendClient";
-import { unwrapPlayerList } from "@/lib/playerTypes";
+import {
+  unwrapPlayerList,
+  type PlayerAward,
+  type PlayerAwardCounts,
+  type PlayerCareerStats,
+  type PlayerSeasonStatsResponse,
+} from "@/lib/playerTypes";
 
+import {
+  awardCountsFromRows,
+  CareerStatLine,
+  countingTotalsFromAggregate,
+  PlayerStatsPageLink,
+  SelectedPlayerStats,
+} from "./DraftPlayerStats";
 import type { EligibilityConstraint, PlayerDetail, PlayerSearchResult } from "./types";
 
 export function PlayerPickerPanel({
@@ -57,6 +70,11 @@ export function PlayerPickerPanel({
   const [selected, setSelected] = useState<PlayerSearchResult | null>(null);
   const [selectedEligibility, setSelectedEligibility] = useState<boolean | null>(null);
   const [selectedRetired, setSelectedRetired] = useState<boolean | null>(null);
+  const [previewDetail, setPreviewDetail] = useState<PlayerDetail | null>(null);
+  const [playoffStats, setPlayoffStats] = useState<PlayerCareerStats | null>(null);
+  const [playoffLoading, setPlayoffLoading] = useState(false);
+  const [careerFallback, setCareerFallback] = useState<PlayerCareerStats | null>(null);
+  const [awardFallback, setAwardFallback] = useState<PlayerAwardCounts | null>(null);
   const detailsCacheRef = useRef<Record<number, PlayerDetail | undefined>>({});
 
   useEffect(() => {
@@ -72,6 +90,8 @@ export function PlayerPickerPanel({
         const params = new URLSearchParams();
         params.set("q", term);
         params.set("limit", "10");
+        params.set("include_career_stats", "true");
+        params.set("include_award_counts", "true");
         // Server-side filtering only supports a single constraint. With multiple options,
         // we fall back to client-side eligibility gating on confirm.
         if (constraints?.length === 1 && constraint && onlyEligible) {
@@ -131,6 +151,7 @@ export function PlayerPickerPanel({
     if (selectedRolledId == null) return null;
     return rolledPlayers.find((p) => p.id === selectedRolledId) ?? null;
   }, [rolledPlayers, selectedRolledId]);
+  const previewPlayerId = selected?.id ?? selectedRolled?.id ?? null;
 
   const canTakeRolled = Boolean(started && canPick && !isSpinning && selectedRolled && !drafted(selectedRolled.id));
 
@@ -145,84 +166,131 @@ export function PlayerPickerPanel({
     return first === L;
   }
 
-  // Eligibility check for "only eligible" OFF (we allow searching all players but gate confirm).
   useEffect(() => {
     let cancelled = false;
     async function run() {
-      setSelectedEligibility(null);
-      setSelectedRetired(null);
-      if (!selected) return;
-      if (drafted(selected.id)) {
-        setSelectedEligibility(false);
+      if (previewPlayerId == null) {
+        setPreviewDetail(null);
         return;
       }
-      if (!constraints?.length) {
-        setSelectedEligibility(true);
-        return;
-      }
-
-      function eligibleForConstraint(detail: PlayerDetail, c: EligibilityConstraint): boolean {
-        if (drafted(detail.id)) return false;
-        const allowActive = c.allowActive !== false;
-        const allowRetired = c.allowRetired !== false;
-        if (!allowActive && !allowRetired) return false;
-        const isRetired = detail.retirement_year != null;
-        if (!allowRetired && isRetired) return false;
-        if (!allowActive && !isRetired) return false;
-
-        if (c.nameLetter) {
-          const part = (c.namePart ?? "first") as "first" | "last" | "either";
-          if (!matchesNameLetter(detail.name, c.nameLetter, part)) return false;
-        }
-
-        const needsStintCheck = Boolean((c.teams?.length ?? 0) || (c.yearStart != null && c.yearEnd != null));
-        if (needsStintCheck) {
-          const teamIds = new Set((c.teams ?? []).map((t) => t.team.id));
-          const ok = (detail.team_stints ?? []).some(
-            (s) =>
-              (teamIds.size === 0 || teamIds.has(s.team_id)) &&
-              (c.yearStart == null ||
-                c.yearEnd == null ||
-                (s.start_year <= c.yearEnd && (s.end_year ?? detail.retirement_year ?? 9999) >= c.yearStart)),
-          );
-          if (!ok) return false;
-        }
-
-        const ccount = detail.coalesced_team_stint_count;
-        if ((c.minTeamStints != null || c.maxTeamStints != null) && typeof ccount !== "number") return false;
-        if (c.minTeamStints != null && typeof ccount === "number" && ccount < c.minTeamStints) return false;
-        if (c.maxTeamStints != null && typeof ccount === "number" && ccount > c.maxTeamStints) return false;
-        return true;
-      }
-
-      const eligibleForAny = (detail: PlayerDetail) => (constraints ?? []).some((c) => eligibleForConstraint(detail, c));
-
-      const cached = detailsCacheRef.current[selected.id];
+      const cached = detailsCacheRef.current[previewPlayerId];
       if (cached) {
-        setSelectedRetired(cached.retirement_year != null);
-        setSelectedEligibility(eligibleForAny(cached));
+        setPreviewDetail(cached);
         return;
       }
-
+      setPreviewDetail(null);
       try {
         const token = await getToken().catch(() => null);
-        const detail = await backendGet<PlayerDetail>(`/players/${selected.id}/details`, token);
-        detailsCacheRef.current[selected.id] = detail;
-        if (cancelled) return;
-        setSelectedRetired(detail.retirement_year != null);
-        setSelectedEligibility(eligibleForAny(detail));
+        const detail = await backendGet<PlayerDetail>(`/players/${previewPlayerId}/details`, token);
+        detailsCacheRef.current[previewPlayerId] = detail;
+        if (!cancelled) setPreviewDetail(detail);
       } catch {
-        if (!cancelled) {
-          setSelectedRetired(null);
-          setSelectedEligibility(false);
-        }
+        if (!cancelled) setPreviewDetail(null);
       }
     }
-    run();
+    void run();
     return () => {
       cancelled = true;
     };
-  }, [selected, drafted, constraints, getToken]);
+  }, [previewPlayerId, getToken]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function run() {
+      if (previewPlayerId == null) {
+        setPlayoffStats(null);
+        setCareerFallback(null);
+        setAwardFallback(null);
+        setPlayoffLoading(false);
+        return;
+      }
+      setPlayoffLoading(true);
+      setPlayoffStats(null);
+      try {
+        const token = await getToken().catch(() => null);
+        const [regular, postseason, awards] = await Promise.all([
+          backendGet<PlayerSeasonStatsResponse>(
+            `/players/${previewPlayerId}/stats?aggregate=true&season_type=regular`,
+            token,
+          ),
+          backendGet<PlayerSeasonStatsResponse>(
+            `/players/${previewPlayerId}/stats?aggregate=true&season_type=postseason`,
+            token,
+          ),
+          backendGet<PlayerAward[]>(`/players/${previewPlayerId}/awards`, token).catch(() => [] as PlayerAward[]),
+        ]);
+        if (cancelled) return;
+        setCareerFallback(countingTotalsFromAggregate(regular.totals));
+        setPlayoffStats(countingTotalsFromAggregate(postseason.totals));
+        setAwardFallback(awardCountsFromRows(awards));
+      } catch {
+        if (!cancelled) {
+          setCareerFallback(null);
+          setPlayoffStats(null);
+          setAwardFallback(null);
+        }
+      } finally {
+        if (!cancelled) setPlayoffLoading(false);
+      }
+    }
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [previewPlayerId, getToken]);
+
+  // Eligibility check for "only eligible" OFF (we allow searching all players but gate confirm).
+  useEffect(() => {
+    setSelectedEligibility(null);
+    setSelectedRetired(null);
+    if (!selected) return;
+    if (drafted(selected.id)) {
+      setSelectedEligibility(false);
+      return;
+    }
+    if (!constraints?.length) {
+      setSelectedEligibility(true);
+      return;
+    }
+    if (!previewDetail || previewDetail.id !== selected.id) return;
+
+    function eligibleForConstraint(detail: PlayerDetail, c: EligibilityConstraint): boolean {
+      if (drafted(detail.id)) return false;
+      const allowActive = c.allowActive !== false;
+      const allowRetired = c.allowRetired !== false;
+      if (!allowActive && !allowRetired) return false;
+      const isRetired = detail.retirement_year != null;
+      if (!allowRetired && isRetired) return false;
+      if (!allowActive && !isRetired) return false;
+
+      if (c.nameLetter) {
+        const part = (c.namePart ?? "first") as "first" | "last" | "either";
+        if (!matchesNameLetter(detail.name, c.nameLetter, part)) return false;
+      }
+
+      const needsStintCheck = Boolean((c.teams?.length ?? 0) || (c.yearStart != null && c.yearEnd != null));
+      if (needsStintCheck) {
+        const teamIds = new Set((c.teams ?? []).map((t) => t.team.id));
+        const ok = (detail.team_stints ?? []).some(
+          (s) =>
+            (teamIds.size === 0 || teamIds.has(s.team_id)) &&
+            (c.yearStart == null ||
+              c.yearEnd == null ||
+              (s.start_year <= c.yearEnd && (s.end_year ?? detail.retirement_year ?? 9999) >= c.yearStart)),
+        );
+        if (!ok) return false;
+      }
+
+      const ccount = detail.coalesced_team_stint_count;
+      if ((c.minTeamStints != null || c.maxTeamStints != null) && typeof ccount !== "number") return false;
+      if (c.minTeamStints != null && typeof ccount === "number" && ccount < c.minTeamStints) return false;
+      if (c.maxTeamStints != null && typeof ccount === "number" && ccount > c.maxTeamStints) return false;
+      return true;
+    }
+
+    setSelectedRetired(previewDetail.retirement_year != null);
+    setSelectedEligibility((constraints ?? []).some((c) => eligibleForConstraint(previewDetail, c)));
+  }, [selected, previewDetail, drafted, constraints]);
 
   const canConfirmPick = useMemo(() => {
     if (!started) return false;
@@ -235,6 +303,19 @@ export function PlayerPickerPanel({
     }
     return true;
   }, [started, selected, canPick, isSpinning, drafted, constraints, selectedEligibility]);
+
+  const previewStatsReady = Boolean(previewDetail && previewDetail.id === previewPlayerId);
+  const selectedCareerStats = previewStatsReady
+    ? previewDetail?.career_stats ?? selected?.career_stats ?? careerFallback
+    : selected?.career_stats ?? careerFallback;
+  const selectedPlayoffStats =
+    previewStatsReady && previewDetail?.playoff_stats ? previewDetail.playoff_stats : playoffStats;
+  const selectedAwardCounts = previewStatsReady
+    ? previewDetail?.award_counts ?? selected?.award_counts ?? awardFallback
+    : selected?.award_counts ?? awardFallback;
+  const selectedHallOfFame = Boolean(
+    (previewStatsReady ? previewDetail?.hall_of_fame : null) ?? selected?.hall_of_fame,
+  );
 
   return (
     <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-900/50">
@@ -283,7 +364,10 @@ export function PlayerPickerPanel({
                       className="h-10 w-10 flex-none rounded-lg object-contain"
                     />
                     <div className="min-w-0">
-                      <div className="truncate text-sm font-semibold">{selectedRolled?.name}</div>
+                      <div className="flex min-w-0 items-center gap-1">
+                        <div className="truncate text-sm font-semibold">{selectedRolled?.name}</div>
+                        {selectedRolled ? <PlayerStatsPageLink playerId={selectedRolled.id} /> : null}
+                      </div>
                     </div>
                   </div>
                   <div className="flex flex-wrap justify-end gap-2">
@@ -300,6 +384,15 @@ export function PlayerPickerPanel({
                     </button>
                   </div>
                 </div>
+
+                <SelectedPlayerStats
+                  careerStats={selectedCareerStats}
+                  playoffStats={selectedPlayoffStats}
+                  awardCounts={selectedAwardCounts}
+                  hallOfFame={selectedHallOfFame}
+                  loading={!selectedCareerStats}
+                  playoffLoading={playoffLoading && !selectedPlayoffStats}
+                />
 
                 {!canPick && currentTurn ? (
                   <div className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">
@@ -372,7 +465,10 @@ export function PlayerPickerPanel({
                       className="h-10 w-10 flex-none rounded-lg object-contain"
                     />
                     <div className="min-w-0">
-                      <div className="truncate text-sm font-semibold">{selected.name}</div>
+                      <div className="flex min-w-0 items-center gap-1">
+                        <div className="truncate text-sm font-semibold">{selected.name}</div>
+                        <PlayerStatsPageLink playerId={selected.id} />
+                      </div>
                     </div>
                   </div>
                   <div className="flex flex-wrap justify-end gap-2">
@@ -403,6 +499,15 @@ export function PlayerPickerPanel({
                     </button>
                   </div>
                 </div>
+
+                <SelectedPlayerStats
+                  careerStats={selectedCareerStats}
+                  playoffStats={selectedPlayoffStats}
+                  awardCounts={selectedAwardCounts}
+                  hallOfFame={selectedHallOfFame}
+                  loading={!selectedCareerStats}
+                  playoffLoading={playoffLoading && !selectedPlayoffStats}
+                />
 
                 {!canPick && currentTurn ? (
                   <div className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">
@@ -520,35 +625,49 @@ export function PlayerPickerPanel({
               {results.slice(0, 8).map((p) => {
                 const isDrafted = drafted(p.id);
                 return (
-                  <button
+                  <div
                     key={p.id}
-                    type="button"
-                    disabled={!canSearch || isDrafted || !canPick}
-                    onClick={() => {
-                      if (!canPick) return;
-                      setSelected(p);
-                      onPreviewPlayer(p.id);
-                      // Clear search after selecting so the user can immediately confirm (or re-search cleanly).
-                      setQ("");
-                      setResults([]);
-                    }}
-                    className="flex items-center justify-between rounded-xl border border-black/10 px-3 py-2 text-left text-sm hover:bg-black/5 disabled:opacity-60 dark:border-white/10 dark:hover:bg-white/10"
+                    className="flex items-stretch gap-1 rounded-xl border border-black/10 hover:bg-black/5 dark:border-white/10 dark:hover:bg-white/10"
                   >
-                    <span className="flex min-w-0 items-center gap-3">
-                      <Image
-                        src={p.image_url ?? "/avatar-placeholder.svg"}
-                        alt={p.name}
-                        width={32}
-                        height={32}
-                        unoptimized
-                        className="h-8 w-8 flex-none rounded-lg object-contain"
-                      />
-                      <span className="truncate">{p.name}</span>
-                    </span>
-                    <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                      {isDrafted ? "Drafted" : canPick ? "Select" : "Wait"}
-                    </span>
-                  </button>
+                    <button
+                      type="button"
+                      disabled={!canSearch || isDrafted || !canPick}
+                      onClick={() => {
+                        if (!canPick) return;
+                        setSelected(p);
+                        onPreviewPlayer(p.id);
+                        // Clear search after selecting so the user can immediately confirm (or re-search cleanly).
+                        setQ("");
+                        setResults([]);
+                      }}
+                      className="flex min-w-0 flex-1 items-center justify-between px-3 py-2 text-left text-sm disabled:opacity-60"
+                    >
+                      <span className="flex min-w-0 items-center gap-3">
+                        <Image
+                          src={p.image_url ?? "/avatar-placeholder.svg"}
+                          alt={p.name}
+                          width={32}
+                          height={32}
+                          unoptimized
+                          className="h-8 w-8 flex-none rounded-lg object-contain"
+                        />
+                        <span className="min-w-0">
+                          <span className="block truncate">{p.name}</span>
+                          {p.career_stats ? (
+                            <span className="mt-0.5 block text-[11px] text-zinc-500 dark:text-zinc-400">
+                              <CareerStatLine stats={p.career_stats} />
+                            </span>
+                          ) : null}
+                        </span>
+                      </span>
+                      <span className="ml-2 flex-none text-xs text-zinc-500 dark:text-zinc-400">
+                        {isDrafted ? "Drafted" : canPick ? "Select" : "Wait"}
+                      </span>
+                    </button>
+                    <div className="flex items-center pr-1">
+                      <PlayerStatsPageLink playerId={p.id} />
+                    </div>
+                  </div>
                 );
               })}
               {results.length === 0 && q.trim() ? <div className="text-sm text-zinc-600 dark:text-zinc-300">No results.</div> : null}

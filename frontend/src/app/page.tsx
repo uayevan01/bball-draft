@@ -9,10 +9,6 @@ export default function Home() {
         <h1 className="mt-3 text-4xl font-semibold tracking-tight sm:text-5xl">
           Draft head-to-head teams with custom rules.
         </h1>
-        <p className="mt-4 max-w-2xl text-lg leading-8 text-zinc-600 dark:text-zinc-300">
-          Create draft types, spin constraints (year/team), draft via live lobby, and track your history + NBA 2K
-          results.
-        </p>
 
         <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
           <SignedOut>

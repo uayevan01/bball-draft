@@ -62,6 +62,7 @@ export function unwrapPlayerList<T>(data: T[] | { items: T[]; total?: number }):
 
 export type PlayerDetail = PlayerListItem & {
   coalesced_team_stint_count?: number;
+  playoff_stats?: PlayerCareerStats | null;
   team_stints?: Array<{
     id: number;
     team_id: number;

@@ -594,10 +594,6 @@ export default function PlayersPage() {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h2 className="text-2xl font-semibold tracking-tight">Player database</h2>
-          <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-            Search by name, position, team, years active, or games played. Open advanced search for counting stats, or
-            filter by accolades.
-          </p>
         </div>
       </div>
 

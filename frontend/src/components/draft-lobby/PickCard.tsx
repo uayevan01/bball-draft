@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 
+import { CareerStatLine, SelectedPlayerStats } from "./DraftPlayerStats";
 import type { DraftPickWs, PlayerDetail } from "./types";
 
 export function PickCard({
@@ -66,6 +67,13 @@ export function PickCard({
                 )}
               </span>
             </div>
+            <div className="mt-1 text-[11px] text-zinc-600 dark:text-zinc-300">
+              {detail?.career_stats ? (
+                <CareerStatLine stats={detail.career_stats} />
+              ) : loading ? (
+                <span className="text-zinc-500 dark:text-zinc-400">Loading stats…</span>
+              ) : null}
+            </div>
           </div>
         </div>
         <div className="flex-none text-xs text-zinc-500 dark:text-zinc-400">{isExpanded ? "Hide" : "Details"}</div>
@@ -73,45 +81,60 @@ export function PickCard({
 
       {isExpanded ? (
         <div className="mt-3 rounded-lg border border-black/10 bg-black/5 p-3 text-xs dark:border-white/10 dark:bg-white/10">
-          {loading ? (
-            <div className="text-zinc-600 dark:text-zinc-300">Loading player history…</div>
-          ) : detail?.team_stints?.length ? (
-            <div className="grid gap-2">
-              <div className="text-xs font-semibold text-zinc-700 dark:text-zinc-200">Team history</div>
-              <div className="grid gap-1">
-                {detail.team_stints
-                  .slice()
-                  .sort((a, b) => a.start_year - b.start_year)
-                  .map((s) => (
-                    <div key={s.id} className="flex items-center justify-between gap-3">
-                      <div className="min-w-0 truncate">
-                        <span className="mr-2 inline-flex items-center gap-2 align-middle">
-                          {s.team?.logo_url ? (
-                            <Image
-                              src={s.team.logo_url}
-                              alt={s.team?.abbreviation ?? "Team logo"}
-                              width={18}
-                              height={18}
-                              unoptimized
-                              className="h-[18px] w-[18px] rounded-sm object-contain"
-                            />
-                          ) : null}
-                          <span className="inline-flex items-center rounded-full border border-black/10 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-900 dark:border-white/10 dark:bg-zinc-900 dark:text-white">
-                            {s.team?.abbreviation ?? "—"}
-                          </span>
-                        </span>
-                        <span className="text-zinc-700 dark:text-zinc-200">{s.team?.name ?? "Unknown team"}</span>
-                      </div>
-                      <div className="flex-none tabular-nums text-zinc-600 dark:text-zinc-300">
-                        {s.start_year}–{s.end_year ?? "Present"}
-                      </div>
-                    </div>
-                  ))}
-              </div>
-            </div>
+          {loading && !detail ? (
+            <div className="text-zinc-600 dark:text-zinc-300">Loading player details…</div>
           ) : (
-            <div className="text-zinc-600 dark:text-zinc-300">
-              No team history found yet. (This will populate as stints finish scraping.)
+            <div className="grid gap-3">
+              <SelectedPlayerStats
+                careerStats={detail?.career_stats}
+                playoffStats={detail?.playoff_stats}
+                awardCounts={detail?.award_counts}
+                hallOfFame={detail?.hall_of_fame}
+                loading={loading}
+                playoffLoading={loading && !detail?.playoff_stats}
+                showCareer={false}
+                className="grid gap-2"
+              />
+
+              {detail?.team_stints?.length ? (
+                <div className="grid gap-2">
+                  <div className="text-xs font-semibold text-zinc-700 dark:text-zinc-200">Team history</div>
+                  <div className="grid gap-1">
+                    {detail.team_stints
+                      .slice()
+                      .sort((a, b) => a.start_year - b.start_year)
+                      .map((s) => (
+                        <div key={s.id} className="flex items-center justify-between gap-3">
+                          <div className="min-w-0 truncate">
+                            <span className="mr-2 inline-flex items-center gap-2 align-middle">
+                              {s.team?.logo_url ? (
+                                <Image
+                                  src={s.team.logo_url}
+                                  alt={s.team?.abbreviation ?? "Team logo"}
+                                  width={18}
+                                  height={18}
+                                  unoptimized
+                                  className="h-[18px] w-[18px] rounded-sm object-contain"
+                                />
+                              ) : null}
+                              <span className="inline-flex items-center rounded-full border border-black/10 bg-white px-2 py-0.5 text-[11px] font-semibold text-zinc-900 dark:border-white/10 dark:bg-zinc-900 dark:text-white">
+                                {s.team?.abbreviation ?? "—"}
+                              </span>
+                            </span>
+                            <span className="text-zinc-700 dark:text-zinc-200">{s.team?.name ?? "Unknown team"}</span>
+                          </div>
+                          <div className="flex-none tabular-nums text-zinc-600 dark:text-zinc-300">
+                            {s.start_year}–{s.end_year ?? "Present"}
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-zinc-600 dark:text-zinc-300">
+                  No team history found yet. (This will populate as stints finish scraping.)
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -119,5 +142,3 @@ export function PickCard({
     </button>
   );
 }
-
-

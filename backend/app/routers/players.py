@@ -377,6 +377,85 @@ def _player_list_order_by(
     return (primary, Player.name.asc(), Player.id.asc())
 
 
+async def _counting_stats_by_player(
+    db: AsyncSession,
+    ids: list[int],
+    *,
+    is_postseason: bool,
+) -> dict[int, PlayerCareerStatsOut]:
+    if not ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(
+                PlayerSeasonStat.player_id,
+                func.sum(PlayerSeasonStat.pts),
+                func.sum(PlayerSeasonStat.trb),
+                func.sum(PlayerSeasonStat.ast),
+                func.sum(PlayerSeasonStat.stl),
+                func.sum(PlayerSeasonStat.blk),
+                func.sum(PlayerSeasonStat.games),
+            )
+            .where(
+                PlayerSeasonStat.player_id.in_(ids),
+                PlayerSeasonStat.is_postseason.is_(is_postseason),
+            )
+            .group_by(PlayerSeasonStat.player_id)
+        )
+    ).all()
+    out: dict[int, PlayerCareerStatsOut] = {}
+    for pid, pts, trb, ast, stl, blk, games in rows:
+        out[int(pid)] = PlayerCareerStatsOut(
+            pts=_int_or_none(pts),
+            trb=_int_or_none(trb),
+            ast=_int_or_none(ast),
+            stl=_int_or_none(stl),
+            blk=_int_or_none(blk),
+            games=_int_or_none(games),
+        )
+    return out
+
+
+async def _award_counts_by_player(db: AsyncSession, ids: list[int]) -> dict[int, PlayerAwardCountsOut]:
+    if not ids:
+        return {}
+    raw: dict[int, dict[str, int]] = {pid: {} for pid in ids}
+    rows = (
+        await db.execute(
+            select(PlayerAward.player_id, Award.slug, func.count())
+            .join(Award, Award.id == PlayerAward.award_id)
+            .where(
+                PlayerAward.player_id.in_(ids),
+                Award.slug.in_(_AWARD_COUNT_SLUGS),
+            )
+            .group_by(PlayerAward.player_id, Award.slug)
+        )
+    ).all()
+    for pid, slug, n in rows:
+        raw[int(pid)][str(slug)] = int(n)
+    out: dict[int, PlayerAwardCountsOut] = {}
+    for pid, counts in raw.items():
+        a1 = counts.get("all_nba_1", 0)
+        a2 = counts.get("all_nba_2", 0)
+        a3 = counts.get("all_nba_3", 0)
+        d1 = counts.get("all_defense_1", 0)
+        d2 = counts.get("all_defense_2", 0)
+        out[pid] = PlayerAwardCountsOut(
+            all_star=counts.get("all_star", 0),
+            all_nba=a1 + a2 + a3,
+            all_nba_1=a1,
+            all_nba_2=a2,
+            all_nba_3=a3,
+            all_defense=d1 + d2,
+            all_defense_1=d1,
+            all_defense_2=d2,
+            mvp=counts.get("mvp", 0),
+            championship=counts.get("championship", 0),
+            finals_mvp=counts.get("finals_mvp", 0),
+        )
+    return out
+
+
 async def _hydrate_player_list(
     db: AsyncSession,
     players: list[Player],
@@ -406,71 +485,8 @@ async def _hydrate_player_list(
         if pid not in latest_team_by_id:
             latest_team_by_id[pid] = int(team_id_raw)
 
-    stats_by_id: dict[int, PlayerCareerStatsOut] = {}
-    if include_career_stats:
-        rows = (
-            await db.execute(
-                select(
-                    PlayerSeasonStat.player_id,
-                    func.sum(PlayerSeasonStat.pts),
-                    func.sum(PlayerSeasonStat.trb),
-                    func.sum(PlayerSeasonStat.ast),
-                    func.sum(PlayerSeasonStat.stl),
-                    func.sum(PlayerSeasonStat.blk),
-                    func.sum(PlayerSeasonStat.games),
-                )
-                .where(
-                    PlayerSeasonStat.player_id.in_(ids),
-                    PlayerSeasonStat.is_postseason.is_(False),
-                )
-                .group_by(PlayerSeasonStat.player_id)
-            )
-        ).all()
-        for pid, pts, trb, ast, stl, blk, games in rows:
-            stats_by_id[int(pid)] = PlayerCareerStatsOut(
-                pts=_int_or_none(pts),
-                trb=_int_or_none(trb),
-                ast=_int_or_none(ast),
-                stl=_int_or_none(stl),
-                blk=_int_or_none(blk),
-                games=_int_or_none(games),
-            )
-
-    awards_by_id: dict[int, PlayerAwardCountsOut] = {}
-    if include_award_counts:
-        raw: dict[int, dict[str, int]] = {pid: {} for pid in ids}
-        rows = (
-            await db.execute(
-                select(PlayerAward.player_id, Award.slug, func.count())
-                .join(Award, Award.id == PlayerAward.award_id)
-                .where(
-                    PlayerAward.player_id.in_(ids),
-                    Award.slug.in_(_AWARD_COUNT_SLUGS),
-                )
-                .group_by(PlayerAward.player_id, Award.slug)
-            )
-        ).all()
-        for pid, slug, n in rows:
-            raw[int(pid)][str(slug)] = int(n)
-        for pid, counts in raw.items():
-            a1 = counts.get("all_nba_1", 0)
-            a2 = counts.get("all_nba_2", 0)
-            a3 = counts.get("all_nba_3", 0)
-            d1 = counts.get("all_defense_1", 0)
-            d2 = counts.get("all_defense_2", 0)
-            awards_by_id[pid] = PlayerAwardCountsOut(
-                all_star=counts.get("all_star", 0),
-                all_nba=a1 + a2 + a3,
-                all_nba_1=a1,
-                all_nba_2=a2,
-                all_nba_3=a3,
-                all_defense=d1 + d2,
-                all_defense_1=d1,
-                all_defense_2=d2,
-                mvp=counts.get("mvp", 0),
-                championship=counts.get("championship", 0),
-                finals_mvp=counts.get("finals_mvp", 0),
-            )
+    stats_by_id = await _counting_stats_by_player(db, ids, is_postseason=False) if include_career_stats else {}
+    awards_by_id = await _award_counts_by_player(db, ids) if include_award_counts else {}
 
     return [
         o.model_copy(
@@ -952,6 +968,13 @@ async def get_player_details(player_id: int, db: AsyncSession = Depends(get_db))
 
     out = PlayerDetailOut.model_validate(player)
     out.coalesced_team_stint_count = count
+    ids = [int(player.id)]
+    career_map = await _counting_stats_by_player(db, ids, is_postseason=False)
+    playoff_map = await _counting_stats_by_player(db, ids, is_postseason=True)
+    award_map = await _award_counts_by_player(db, ids)
+    out.career_stats = career_map.get(player.id)
+    out.playoff_stats = playoff_map.get(player.id)
+    out.award_counts = award_map.get(player.id)
     return out
 
 

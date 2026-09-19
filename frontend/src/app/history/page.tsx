@@ -58,7 +58,6 @@ export default function HistoryPage() {
   return (
     <AppShell>
       <h2 className="text-2xl font-semibold tracking-tight">Draft history</h2>
-      <p className="mt-2 text-zinc-600 dark:text-zinc-300">Your recent drafts.</p>
 
       {error ? (
         <div className="mt-6 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300">

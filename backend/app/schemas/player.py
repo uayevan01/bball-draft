@@ -54,6 +54,7 @@ class PlayerDetailOut(PlayerOut):
     # Number of team stints after coalescing consecutive stints that belong to the same franchise
     # (e.g., SEA->OKC without another team in between counts as 1).
     coalesced_team_stint_count: int = 0
+    playoff_stats: PlayerCareerStatsOut | None = None
 
 
 class PlayerListPageOut(ORMBaseModel):
