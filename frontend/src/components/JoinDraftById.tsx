@@ -10,8 +10,9 @@ export function JoinDraftById() {
   const trimmed = useMemo(() => draftId.trim(), [draftId]);
 
   return (
-    <div className="mt-6 rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-black">
+    <div>
       <div className="text-sm font-semibold">Join by ID</div>
+      <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">Already have a lobby? Paste the draft ID to hop in.</p>
 
       <form
         className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center"
@@ -38,5 +39,3 @@ export function JoinDraftById() {
     </div>
   );
 }
-
-

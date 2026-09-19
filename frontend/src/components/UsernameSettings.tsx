@@ -90,7 +90,7 @@ export function UsernameSettings() {
   }
 
   return (
-    <div className="mt-6 rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-black">
+    <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-black sm:p-5">
       <div className="text-sm font-semibold">Profile</div>
       <div className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
         {loading ? "Loading…" : me ? `Signed in as: ${me.username || me.full_name || me.email || me.clerk_id}` : "—"}

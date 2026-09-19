@@ -54,9 +54,9 @@ export function RecentDrafts({ limit = 5 }: { limit?: number }) {
   }, [getToken, limit]);
 
   return (
-    <div className="mt-6 rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-black">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-black sm:p-5">
       <div className="flex items-center justify-between gap-3">
-        <div className="text-sm font-semibold">Recent drafts</div>
+        <div className="text-sm font-semibold">History</div>
         <Link href="/history" className="text-xs text-zinc-600 hover:underline dark:text-zinc-300">
           View all
         </Link>
@@ -68,7 +68,8 @@ export function RecentDrafts({ limit = 5 }: { limit?: number }) {
       ) : null}
 
       {!loading && !error ? (
-        <div className="mt-3 grid gap-2">
+        <div className="mt-3 min-h-0 flex-1 overflow-y-auto overscroll-contain">
+          <div className="grid gap-2">
           {items.length === 0 ? (
             <div className="text-sm text-zinc-600 dark:text-zinc-300">No drafts yet.</div>
           ) : (
@@ -107,6 +108,7 @@ export function RecentDrafts({ limit = 5 }: { limit?: number }) {
               </Link>
             ))
           )}
+          </div>
         </div>
       ) : null}
     </div>

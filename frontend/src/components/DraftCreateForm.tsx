@@ -48,7 +48,7 @@ export function DraftCreateForm({ draftTypes }: { draftTypes: DraftType[] }) {
   }
 
   return (
-    <div className="mt-6 grid gap-6">
+    <div className="mt-5 grid gap-5">
       <div className="grid gap-2">
         <div className="flex items-center justify-between">
           <label className="text-sm font-medium">Draft type</label>
