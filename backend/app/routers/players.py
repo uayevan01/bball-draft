@@ -50,6 +50,7 @@ _SORT_KEYS = (
     "position",
     "team",
     "years",
+    "games",
     "pts",
     "trb",
     "ast",
@@ -348,6 +349,8 @@ def _player_list_order_by(
         primary = _directed(_latest_team_sort_expr(), sort_dir)
     elif sort_by == "years":
         primary = _directed(Player.career_start_year, sort_dir)
+    elif sort_by == "games":
+        primary = _directed(_career_stat_sort_expr(PlayerSeasonStat.games, per_game=False), sort_dir)
     elif sort_by == "hof":
         primary = _directed(Player.hall_of_fame, sort_dir)
     elif sort_by == "all_nba":

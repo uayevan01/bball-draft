@@ -21,7 +21,7 @@ type StatBounds = Record<StatKey, { min: string; max: string }>;
 type AccoladeCountKey = "all_nba" | "all_star" | "all_def" | "mvp" | "rings" | "fmvp";
 type AccoladeBounds = Record<AccoladeCountKey, { min: string; max: string }>;
 type SortDir = "asc" | "desc";
-type SortKey = "name" | "position" | "team" | "years" | StatKey | "hof" | AccoladeCountKey;
+type SortKey = "name" | "position" | "team" | "years" | "games" | StatKey | "hof" | AccoladeCountKey;
 
 const DEFAULT_SORT_KEY: SortKey = "name";
 const DEFAULT_SORT_DIR: SortDir = "asc";
@@ -99,7 +99,7 @@ function formatCareerStat(
 }
 
 function formatCount(n: number | null | undefined): string {
-  if (n == null || Number.isNaN(n)) return "—";
+  if (n == null || Number.isNaN(n)) return "0";
   return String(n);
 }
 
@@ -302,8 +302,10 @@ export default function PlayersPage() {
   const [teamId, setTeamId] = useState("");
   const [activeFrom, setActiveFrom] = useState("");
   const [activeTo, setActiveTo] = useState("");
+  const [gamesMin, setGamesMin] = useState("");
+  const [gamesMax, setGamesMax] = useState("");
 
-  const [statMode, setStatMode] = useState<StatMode>("totals");
+  const [statMode, setStatMode] = useState<StatMode>("per_game");
   const [statBounds, setStatBounds] = useState<StatBounds>(EMPTY_STAT_BOUNDS);
   const [accoladeBounds, setAccoladeBounds] = useState<AccoladeBounds>(EMPTY_ACCOLADE_BOUNDS);
 
@@ -322,6 +324,8 @@ export default function PlayersPage() {
   const debouncedName = useDebouncedValue(nameQuery.trim());
   const debouncedActiveFrom = useDebouncedValue(activeFrom);
   const debouncedActiveTo = useDebouncedValue(activeTo);
+  const debouncedGamesMin = useDebouncedValue(gamesMin);
+  const debouncedGamesMax = useDebouncedValue(gamesMax);
   const debouncedStatBounds = useDebouncedValue(statBounds);
   const debouncedAccoladeBounds = useDebouncedValue(accoladeBounds);
 
@@ -358,6 +362,8 @@ export default function PlayersPage() {
     teamId,
     debouncedActiveFrom,
     debouncedActiveTo,
+    debouncedGamesMin,
+    debouncedGamesMax,
     statMode,
     debouncedStatBounds,
     debouncedAccoladeBounds,
@@ -399,10 +405,14 @@ export default function PlayersPage() {
     const toYear = parseOptionalInt(debouncedActiveTo);
     if (fromYear !== undefined) params.set("active_from", String(fromYear));
     if (toYear !== undefined) params.set("active_to", String(toYear));
+    const minGames = parseOptionalNumber(debouncedGamesMin);
+    const maxGames = parseOptionalNumber(debouncedGamesMax);
+    if (minGames !== undefined) params.set("min_games", String(Math.trunc(minGames)));
+    if (maxGames !== undefined) params.set("max_games", String(Math.trunc(maxGames)));
+    params.set("include_career_stats", "true");
 
     if (activeStatKeys.length > 0) {
       params.set("stat_mode", statMode);
-      params.set("include_career_stats", "true");
       for (const key of activeStatKeys) {
         const minN = parseOptionalNumber(debouncedStatBounds[key].min);
         const maxN = parseOptionalNumber(debouncedStatBounds[key].max);
@@ -441,6 +451,8 @@ export default function PlayersPage() {
     teamId,
     debouncedActiveFrom,
     debouncedActiveTo,
+    debouncedGamesMin,
+    debouncedGamesMax,
     statMode,
     debouncedStatBounds,
     activeStatKeys,
@@ -541,14 +553,14 @@ export default function PlayersPage() {
   }, [activeStatKeys, statMode, hallOfFame, activeAccoladeKeys, allNba1, allNba2, allNba3, allDef1, allDef2]);
 
   useEffect(() => {
-    const visible = new Set<SortKey>(["name", "position", "team", "years", ...extraColumns.map((c) => c.key)]);
+    const visible = new Set<SortKey>(["name", "position", "team", "years", "games", ...extraColumns.map((c) => c.key)]);
     if (!visible.has(sortBy)) {
       setSortBy(DEFAULT_SORT_KEY);
       setSortDir(DEFAULT_SORT_DIR);
     }
   }, [extraColumns, sortBy]);
 
-  const colCount = 4 + extraColumns.length;
+  const colCount = 5 + extraColumns.length;
 
   const inputClass =
     "h-10 w-full min-w-0 rounded-xl border border-black/10 bg-white px-3 text-sm outline-none focus:border-zinc-400 dark:border-white/10 dark:bg-black dark:focus:border-zinc-500";
@@ -583,13 +595,13 @@ export default function PlayersPage() {
         <div>
           <h2 className="text-2xl font-semibold tracking-tight">Player database</h2>
           <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-            Search by name, position, team, or years active. Open advanced search for counting stats, or filter by
-            accolades.
+            Search by name, position, team, years active, or games played. Open advanced search for counting stats, or
+            filter by accolades.
           </p>
         </div>
       </div>
 
-      <div className="mt-6 grid gap-3 rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-900/40 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="mt-6 grid gap-3 rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-900/40 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7">
         <label className="grid gap-1 text-xs font-medium text-zinc-600 dark:text-zinc-400">
           Name
           <input
@@ -643,6 +655,28 @@ export default function PlayersPage() {
             />
           </label>
         </div>
+        <div className="grid grid-cols-2 gap-3 sm:contents">
+          <label className="grid gap-1 text-xs font-medium text-zinc-600 dark:text-zinc-400">
+            Games from
+            <input
+              className={inputClass}
+              inputMode="numeric"
+              value={gamesMin}
+              onChange={(e) => setGamesMin(e.target.value)}
+              placeholder="no min"
+            />
+          </label>
+          <label className="grid gap-1 text-xs font-medium text-zinc-600 dark:text-zinc-400">
+            Games to
+            <input
+              className={inputClass}
+              inputMode="numeric"
+              value={gamesMax}
+              onChange={(e) => setGamesMax(e.target.value)}
+              placeholder="no max"
+            />
+          </label>
+        </div>
       </div>
 
       <div className="mt-3 grid gap-3">
@@ -653,22 +687,8 @@ export default function PlayersPage() {
           badge={advancedCount || undefined}
         >
           <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-            <p className="text-sm text-zinc-600 dark:text-zinc-400">
-              Filter by career regular-season counting stats. Columns appear in the table only for stats you set.
-            </p>
             <div className="inline-flex w-full rounded-full border border-black/10 bg-white p-1 text-sm sm:w-auto dark:border-white/10 dark:bg-black">
-              <button
-                type="button"
-                onClick={() => setStatMode("totals")}
-                className={[
-                  "h-9 flex-1 rounded-full px-3 font-semibold sm:flex-none sm:px-4",
-                  statMode === "totals"
-                    ? "bg-zinc-950 text-white dark:bg-white dark:text-black"
-                    : "text-zinc-700 hover:text-zinc-950 dark:text-zinc-300 dark:hover:text-white",
-                ].join(" ")}
-              >
-                Totals
-              </button>
+              
               <button
                 type="button"
                 onClick={() => setStatMode("per_game")}
@@ -680,6 +700,18 @@ export default function PlayersPage() {
                 ].join(" ")}
               >
                 Per game
+              </button>
+              <button
+                type="button"
+                onClick={() => setStatMode("totals")}
+                className={[
+                  "h-9 flex-1 rounded-full px-3 font-semibold sm:flex-none sm:px-4",
+                  statMode === "totals"
+                    ? "bg-zinc-950 text-white dark:bg-white dark:text-black"
+                    : "text-zinc-700 hover:text-zinc-950 dark:text-zinc-300 dark:hover:text-white",
+                ].join(" ")}
+              >
+                Totals
               </button>
             </div>
           </div>
@@ -732,10 +764,6 @@ export default function PlayersPage() {
           onToggle={() => setAccoladesOpen((v) => !v)}
           badge={accoladeCount || undefined}
         >
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            Filter by career award counts. Columns appear only for accolades you set. For All-NBA and All-Defensive,
-            choose which teams count toward min/max; leave them unchecked to include every team.
-          </p>
           <div className="mt-3">
             <CheckLabel label="Hall of Fame" checked={hallOfFame} onChange={setHallOfFame} />
           </div>
@@ -789,6 +817,7 @@ export default function PlayersPage() {
           <option value="position">Pos</option>
           <option value="team">Team</option>
           <option value="years">Years</option>
+          <option value="games">G</option>
           {extraColumns.map((col) => (
             <option key={col.key} value={col.key}>
               {col.label}
@@ -838,7 +867,12 @@ export default function PlayersPage() {
               <span className="min-w-0 flex-1">
                 <span className="block truncate font-medium">{p.name}</span>
                 <span className="mt-0.5 block truncate text-xs text-zinc-500">
-                  {[p.position || null, teamLabel(p) !== "—" ? teamLabel(p) : null, formatCareerYears(p.career_start_year, p.retirement_year)]
+                  {[
+                    p.position || null,
+                    teamLabel(p) !== "—" ? teamLabel(p) : null,
+                    formatCareerYears(p.career_start_year, p.retirement_year),
+                    p.career_stats?.games != null ? `${p.career_stats.games} G` : null,
+                  ]
                     .filter((v) => v && v !== "—")
                     .join(" · ")}
                 </span>
@@ -865,6 +899,7 @@ export default function PlayersPage() {
               <SortableTh label="Pos" sortKey="position" activeKey={sortBy} dir={sortDir} onSort={onSort} />
               <SortableTh label="Team" sortKey="team" activeKey={sortBy} dir={sortDir} onSort={onSort} />
               <SortableTh label="Years" sortKey="years" activeKey={sortBy} dir={sortDir} onSort={onSort} />
+              <SortableTh label="G" sortKey="games" activeKey={sortBy} dir={sortDir} onSort={onSort} />
               {extraColumns.map((col) => (
                 <SortableTh
                   key={col.key}
@@ -919,6 +954,9 @@ export default function PlayersPage() {
                   <td className="px-2 py-3 text-zinc-600 sm:px-4 dark:text-zinc-300">{teamLabel(p)}</td>
                   <td className="px-2 py-3 text-zinc-600 sm:px-4 dark:text-zinc-300">
                     {formatCareerYears(p.career_start_year, p.retirement_year)}
+                  </td>
+                  <td className="px-2 py-3 tabular-nums text-zinc-600 sm:px-4 dark:text-zinc-300">
+                    {formatCount(p.career_stats?.games)}
                   </td>
                   {extraColumns.map((col) => (
                     <td key={col.key} className="px-2 py-3 tabular-nums text-zinc-600 sm:px-4 dark:text-zinc-300">
