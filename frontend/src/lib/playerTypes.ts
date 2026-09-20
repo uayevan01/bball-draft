@@ -16,6 +16,9 @@ export type PlayerCareerStats = {
   stl?: number | null;
   blk?: number | null;
   games?: number | null;
+  fg_pct?: number | null;
+  fg3_pct?: number | null;
+  ft_pct?: number | null;
 };
 
 export type PlayerAwardCounts = {

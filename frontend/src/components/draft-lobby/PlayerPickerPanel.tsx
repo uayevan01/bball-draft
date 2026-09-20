@@ -5,6 +5,7 @@ import Image from "next/image";
 import { useAuth } from "@clerk/nextjs";
 
 import { backendGet } from "@/lib/backendClient";
+import { appendStatFilterParams, playerMatchesStatConstraints, rulesHaveStatConstraints } from "@/lib/draftRules";
 import {
   unwrapPlayerList,
   type PlayerAward,
@@ -92,6 +93,14 @@ export function PlayerPickerPanel({
         params.set("limit", "10");
         params.set("include_career_stats", "true");
         params.set("include_award_counts", "true");
+        if (constraint && onlyEligible) {
+          appendStatFilterParams(params, {
+            statMode: constraint.statMode,
+            careerStatBounds: constraint.careerStatBounds,
+            shootingBounds: constraint.shootingBounds,
+            accoladeBounds: constraint.accoladeBounds,
+          });
+        }
         // Server-side filtering only supports a single constraint. With multiple options,
         // we fall back to client-side eligibility gating on confirm.
         if (constraints?.length === 1 && constraint && onlyEligible) {
@@ -285,6 +294,16 @@ export function PlayerPickerPanel({
       if ((c.minTeamStints != null || c.maxTeamStints != null) && typeof ccount !== "number") return false;
       if (c.minTeamStints != null && typeof ccount === "number" && ccount < c.minTeamStints) return false;
       if (c.maxTeamStints != null && typeof ccount === "number" && ccount > c.maxTeamStints) return false;
+      if (
+        !playerMatchesStatConstraints(detail.career_stats, detail.award_counts, {
+          statMode: c.statMode,
+          careerStatBounds: c.careerStatBounds,
+          shootingBounds: c.shootingBounds,
+          accoladeBounds: c.accoladeBounds,
+        })
+      ) {
+        return false;
+      }
       return true;
     }
 
@@ -568,6 +587,34 @@ export function PlayerPickerPanel({
                       <span className="text-emerald-700 dark:text-emerald-300">
                         {selectedRetired ? "Retired player allowed." : "Active player allowed."}
                       </span>
+                    )}
+                  </div>
+                ) : null}
+
+                {constraint &&
+                selected &&
+                rulesHaveStatConstraints({
+                  stat_mode: constraint.statMode ?? undefined,
+                  career_stat_bounds: constraint.careerStatBounds ?? undefined,
+                  shooting_bounds: constraint.shootingBounds ?? undefined,
+                  accolade_bounds: constraint.accoladeBounds ?? undefined,
+                }) ? (
+                  <div className="mt-2 text-xs">
+                    {previewDetail && previewDetail.id === selected.id ? (
+                      playerMatchesStatConstraints(previewDetail.career_stats, previewDetail.award_counts, {
+                        statMode: constraint.statMode,
+                        careerStatBounds: constraint.careerStatBounds,
+                        shootingBounds: constraint.shootingBounds,
+                        accoladeBounds: constraint.accoladeBounds,
+                      }) ? (
+                        <span className="text-emerald-700 dark:text-emerald-300">Meets this draft type’s stats and accolade limits.</span>
+                      ) : (
+                        <span className="text-red-700 dark:text-red-300">
+                          Can’t select this player — doesn’t meet this draft type’s stats or accolade limits.
+                        </span>
+                      )
+                    ) : (
+                      <span className="text-zinc-600 dark:text-zinc-300">Checking stats limits…</span>
                     )}
                   </div>
                 ) : null}

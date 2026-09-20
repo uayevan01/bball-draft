@@ -1,15 +1,25 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
+  ACCOLADE_FIELDS,
+  CAREER_STAT_FIELDS,
   DECADES,
   DIVISIONS,
+  SHOOTING_FIELDS,
+  type AccoladeKey,
+  type CareerStatKey,
   type DraftRules,
   type NameLetterConstraint,
+  type RangeBound,
+  type ShootingKey,
   type TeamConstraint,
   type YearConstraint,
+  defaultAccoladeBounds,
+  defaultCareerStatBounds,
   defaultDraftRules,
+  defaultShootingBounds,
 } from "@/lib/draftRules";
 
 export function DraftRulesBuilder({
@@ -33,6 +43,10 @@ export function DraftRulesBuilder({
   const yearType = rules.year_constraint.type;
   const teamType = rules.team_constraint.type;
   const nameLetterType = rules.name_letter_constraint.type;
+  const careerStatBounds = rules.career_stat_bounds ?? defaultCareerStatBounds();
+  const shootingBounds = rules.shooting_bounds ?? defaultShootingBounds();
+  const accoladeBounds = rules.accolade_bounds ?? defaultAccoladeBounds();
+  const statMode = rules.stat_mode === "totals" ? "totals" : "per_game";
 
   const specificLettersText = useMemo(() => {
     if (rules.name_letter_constraint.type !== "specific") return "";
@@ -473,6 +487,88 @@ export function DraftRulesBuilder({
       </div>
 
       <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-black">
+        <div className="text-sm font-semibold">Career stats</div>
+        <div className="mt-3 grid gap-3">
+          <div className="flex flex-wrap gap-2">
+            {([
+              { value: "per_game", label: "Per game" },
+              { value: "totals", label: "Career totals" },
+            ] as const).map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                className={`h-9 rounded-full px-3 text-sm font-semibold ${
+                  statMode === opt.value
+                    ? "bg-zinc-950 text-white dark:bg-white dark:text-black"
+                    : "border border-black/10 bg-white text-zinc-800 hover:bg-black/5 dark:border-white/10 dark:bg-black dark:text-zinc-200 dark:hover:bg-white/10"
+                }`}
+                onClick={() => onChange({ ...rules, stat_mode: opt.value })}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
+          <BoundTable
+            headers={["Stat", "Min", "Max"]}
+            rows={CAREER_STAT_FIELDS.map((field) => ({
+              key: field.key,
+              label: statMode === "per_game" ? `${field.label} (${field.perGameShort})` : `${field.label} (${field.totalShort})`,
+              bound: careerStatBounds[field.key],
+              integer: false,
+            }))}
+            onBoundChange={(key, bound) =>
+              onChange({
+                ...rules,
+                career_stat_bounds: { ...careerStatBounds, [key as CareerStatKey]: bound },
+              })
+            }
+          />
+
+          <BoundTable
+            headers={["Stat", "Min %", "Max %"]}
+            rows={SHOOTING_FIELDS.map((field) => ({
+              key: field.key,
+              label: field.label,
+              bound: shootingBounds[field.key],
+              integer: false,
+              maxValue: 100,
+            }))}
+            onBoundChange={(key, bound) =>
+              onChange({
+                ...rules,
+                shooting_bounds: { ...shootingBounds, [key as ShootingKey]: bound },
+              })
+            }
+          />
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-black">
+        <div className="text-sm font-semibold">Accolades</div>
+        <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+          Career counts for All-Star, All-NBA, MVP, championships, and Finals MVPs.
+        </div>
+        <div className="mt-3">
+          <BoundTable
+            headers={["Accolade", "Min", "Max"]}
+            rows={ACCOLADE_FIELDS.map((field) => ({
+              key: field.key,
+              label: field.label,
+              bound: accoladeBounds[field.key],
+              integer: true,
+            }))}
+            onBoundChange={(key, bound) =>
+              onChange({
+                ...rules,
+                accolade_bounds: { ...accoladeBounds, [key as AccoladeKey]: bound },
+              })
+            }
+          />
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-black">
         <div className="text-sm font-semibold">Draft mechanics</div>
         <div className="mt-3 grid gap-2">
 
@@ -502,6 +598,115 @@ export function DraftRulesBuilder({
       >
         Reset to defaults
       </button>
+    </div>
+  );
+}
+
+function parseBoundValue(raw: string, integer: boolean, maxValue?: number): number | null {
+  const t = raw.trim();
+  if (!t) return null;
+  const n = Number(t);
+  if (!Number.isFinite(n) || n < 0) return null;
+  const v = integer ? Math.floor(n) : n;
+  if (typeof maxValue === "number") return Math.min(maxValue, v);
+  return v;
+}
+
+function BoundNumberInput({
+  value,
+  integer,
+  maxValue,
+  placeholder,
+  onCommit,
+}: {
+  value: number | null | undefined;
+  integer: boolean;
+  maxValue?: number;
+  placeholder: string;
+  onCommit: (next: number | null) => void;
+}) {
+  const [text, setText] = useState(value == null ? "" : String(value));
+  const [focused, setFocused] = useState(false);
+  useEffect(() => {
+    if (!focused) setText(value == null ? "" : String(value));
+  }, [value, focused]);
+  return (
+    <input
+      className="h-9 w-full rounded-lg border border-black/10 bg-white px-2 text-sm dark:border-white/10 dark:bg-black"
+      inputMode="decimal"
+      value={text}
+      placeholder={placeholder}
+      onFocus={() => setFocused(true)}
+      onBlur={() => {
+        setFocused(false);
+        onCommit(parseBoundValue(text, integer, maxValue));
+      }}
+      onChange={(e) => {
+        const raw = e.target.value;
+        setText(raw);
+        if (!raw.trim() || raw.trim() === ".") {
+          onCommit(null);
+          return;
+        }
+        if (raw.endsWith(".") || raw.endsWith("-")) return;
+        onCommit(parseBoundValue(raw, integer, maxValue));
+      }}
+    />
+  );
+}
+
+function BoundTable({
+  headers,
+  rows,
+  onBoundChange,
+}: {
+  headers: [string, string, string];
+  rows: Array<{ key: string; label: string; bound: RangeBound; integer: boolean; maxValue?: number }>;
+  onBoundChange: (key: string, bound: RangeBound) => void;
+}) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[320px] text-left text-sm">
+        <thead>
+          <tr className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+            <th className="pb-2 pr-3 font-medium">{headers[0]}</th>
+            <th className="pb-2 pr-3 font-medium">{headers[1]}</th>
+            <th className="pb-2 font-medium">{headers[2]}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => {
+            const bound = row.bound ?? { min: null, max: null };
+            const invalid = typeof bound.min === "number" && typeof bound.max === "number" && bound.min > bound.max;
+            return (
+              <tr key={row.key}>
+                <td className="py-1.5 pr-3 font-medium text-zinc-800 dark:text-zinc-200">{row.label}</td>
+                <td className="py-1.5 pr-3">
+                  <BoundNumberInput
+                    value={bound.min}
+                    integer={row.integer}
+                    maxValue={row.maxValue}
+                    placeholder="no min"
+                    onCommit={(min) => onBoundChange(row.key, { min, max: bound.max })}
+                  />
+                </td>
+                <td className="py-1.5">
+                  <BoundNumberInput
+                    value={bound.max}
+                    integer={row.integer}
+                    maxValue={row.maxValue}
+                    placeholder="no max"
+                    onCommit={(max) => onBoundChange(row.key, { min: bound.min, max })}
+                  />
+                  {invalid ? (
+                    <div className="mt-1 text-[11px] text-red-700 dark:text-red-300">Min can’t exceed max</div>
+                  ) : null}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }

@@ -3,13 +3,23 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import Float, and_, desc, exists, func, or_, select
+from sqlalchemy import desc, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
 from app.database import get_db
 from app.models import Award, Player, PlayerAward, PlayerSeasonStat, PlayerTeamStint, Season, Team
 from app.schemas.player import PlayerAwardCountsOut, PlayerCareerStatsOut, PlayerDetailOut, PlayerListPageOut, PlayerOut
+from app.services.player_filters import (
+    STAT_MODES,
+    PlayerStatFilters,
+    StatRange,
+    apply_award_count_bounds,
+    apply_player_stat_filters,
+    award_count_expr,
+    career_stat_sort_expr,
+    percent_to_rate,
+)
 from app.schemas.player_award import PlayerAwardOut
 from app.schemas.player_season_stat import (
     PlayerSeasonStatOut,
@@ -43,7 +53,7 @@ _COUNTING_FIELDS = (
 )
 
 _SEASON_TYPES = ("regular", "postseason", "all")
-_STAT_MODES = ("totals", "per_game")
+_STAT_MODES = STAT_MODES
 _SORT_DIRS = ("asc", "desc")
 _SORT_KEYS = (
     "name",
@@ -248,43 +258,21 @@ def _int_or_none(value: object) -> int | None:
     return int(value)
 
 
-def _has_awards(*slugs: str):
-    return exists(
-        select(1)
-        .select_from(PlayerAward)
-        .join(Award, Award.id == PlayerAward.award_id)
-        .where(PlayerAward.player_id == Player.id, Award.slug.in_(list(slugs)))
-    )
-
-
-def _career_stat_expr(col: object, *, per_game: bool):
-    total = func.coalesce(func.sum(col), 0)
-    if not per_game:
-        return total
-    games = func.nullif(func.coalesce(func.sum(PlayerSeasonStat.games), 0), 0)
-    # Cast so Postgres does float division (integer / integer would truncate PPG).
-    return func.cast(total, Float) / games
+def _rate_or_none(makes: object, atts: object) -> float | None:
+    if makes is None or atts is None:
+        return None
+    den = float(atts)
+    if den == 0:
+        return None
+    return float(makes) / den
 
 
 def _career_stat_sort_expr(col: object, *, per_game: bool):
-    return (
-        select(_career_stat_expr(col, per_game=per_game))
-        .where(
-            PlayerSeasonStat.player_id == Player.id,
-            PlayerSeasonStat.is_postseason.is_(False),
-        )
-        .scalar_subquery()
-    )
+    return career_stat_sort_expr(col, per_game=per_game)
 
 
 def _award_count_sort_expr(*slugs: str):
-    return (
-        select(func.count())
-        .select_from(PlayerAward)
-        .join(Award, Award.id == PlayerAward.award_id)
-        .where(PlayerAward.player_id == Player.id, Award.slug.in_(list(slugs)))
-        .scalar_subquery()
-    )
+    return award_count_expr(*slugs)
 
 
 def _latest_team_sort_expr():
@@ -313,21 +301,10 @@ def _selected_award_slugs(
 
 
 def _apply_award_count_bounds(stmt, *, slugs: list[str], min_v: int | None, max_v: int | None, label: str, legacy: bool | None):
-    if min_v is not None and max_v is not None and min_v > max_v:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"min_{label} cannot exceed max_{label}",
-        )
-    if min_v is None and max_v is None:
-        if legacy:
-            return stmt.where(_has_awards(*slugs))
-        return stmt
-    expr = _award_count_sort_expr(*slugs)
-    if min_v is not None:
-        stmt = stmt.where(expr >= min_v)
-    if max_v is not None:
-        stmt = stmt.where(expr <= max_v)
-    return stmt
+    try:
+        return apply_award_count_bounds(stmt, slugs=slugs, min_v=min_v, max_v=max_v, label=label, legacy=legacy)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
 
 def _player_list_order_by(
@@ -395,6 +372,12 @@ async def _counting_stats_by_player(
                 func.sum(PlayerSeasonStat.stl),
                 func.sum(PlayerSeasonStat.blk),
                 func.sum(PlayerSeasonStat.games),
+                func.sum(PlayerSeasonStat.fg),
+                func.sum(PlayerSeasonStat.fga),
+                func.sum(PlayerSeasonStat.fg3),
+                func.sum(PlayerSeasonStat.fg3a),
+                func.sum(PlayerSeasonStat.ft),
+                func.sum(PlayerSeasonStat.fta),
             )
             .where(
                 PlayerSeasonStat.player_id.in_(ids),
@@ -404,7 +387,7 @@ async def _counting_stats_by_player(
         )
     ).all()
     out: dict[int, PlayerCareerStatsOut] = {}
-    for pid, pts, trb, ast, stl, blk, games in rows:
+    for pid, pts, trb, ast, stl, blk, games, fg, fga, fg3, fg3a, ft, fta in rows:
         out[int(pid)] = PlayerCareerStatsOut(
             pts=_int_or_none(pts),
             trb=_int_or_none(trb),
@@ -412,6 +395,9 @@ async def _counting_stats_by_player(
             stl=_int_or_none(stl),
             blk=_int_or_none(blk),
             games=_int_or_none(games),
+            fg_pct=_rate_or_none(fg, fga),
+            fg3_pct=_rate_or_none(fg3, fg3a),
+            ft_pct=_rate_or_none(ft, fta),
         )
     return out
 
@@ -565,6 +551,12 @@ async def list_players(
     max_blk: float | None = Query(default=None, ge=0, description="Maximum career blocks (totals or per-game)"),
     min_games: int | None = Query(default=None, ge=0, description="Minimum career games played"),
     max_games: int | None = Query(default=None, ge=0, description="Maximum career games played"),
+    min_fg_pct: float | None = Query(default=None, ge=0, le=100, description="Minimum career FG% (0-100)"),
+    max_fg_pct: float | None = Query(default=None, ge=0, le=100, description="Maximum career FG% (0-100)"),
+    min_fg3_pct: float | None = Query(default=None, ge=0, le=100, description="Minimum career 3P% (0-100)"),
+    max_fg3_pct: float | None = Query(default=None, ge=0, le=100, description="Maximum career 3P% (0-100)"),
+    min_ft_pct: float | None = Query(default=None, ge=0, le=100, description="Minimum career FT% (0-100)"),
+    max_ft_pct: float | None = Query(default=None, ge=0, le=100, description="Maximum career FT% (0-100)"),
     hall_of_fame: bool | None = Query(default=None, description="If true, only Hall of Fame players"),
     all_star: bool | None = Query(default=None, description="If true, require at least one All-Star (ignored when min_/max_all_star is set)"),
     all_nba: bool | None = Query(default=None, description="If true, require any All-NBA team (ignored when min_/max_all_nba is set)"),
@@ -630,7 +622,26 @@ async def list_players(
 
     stat_bounds_set = any(
         v is not None
-        for v in (min_pts, max_pts, min_trb, max_trb, min_ast, max_ast, min_stl, max_stl, min_blk, max_blk, min_games, max_games)
+        for v in (
+            min_pts,
+            max_pts,
+            min_trb,
+            max_trb,
+            min_ast,
+            max_ast,
+            min_stl,
+            max_stl,
+            min_blk,
+            max_blk,
+            min_games,
+            max_games,
+            min_fg_pct,
+            max_fg_pct,
+            min_fg3_pct,
+            max_fg3_pct,
+            min_ft_pct,
+            max_ft_pct,
+        )
     )
     all_nba_team_slugs = _selected_award_slugs(
         ((all_nba_1, "all_nba_1"), (all_nba_2, "all_nba_2"), (all_nba_3, "all_nba_3")),
@@ -803,36 +814,24 @@ async def list_players(
             else:
                 stmt = stmt.where(first_letter.in_(letters))
 
-    career_stat_bounds: list[tuple[str, float | int | None, float | int | None, object, bool]] = [
-        ("pts", min_pts, max_pts, PlayerSeasonStat.pts, True),
-        ("trb", min_trb, max_trb, PlayerSeasonStat.trb, True),
-        ("ast", min_ast, max_ast, PlayerSeasonStat.ast, True),
-        ("stl", min_stl, max_stl, PlayerSeasonStat.stl, True),
-        ("blk", min_blk, max_blk, PlayerSeasonStat.blk, True),
-        ("games", min_games, max_games, PlayerSeasonStat.games, False),
-    ]
-    having_clauses = []
-    per_game = stat_mode == "per_game"
-    for label, min_v, max_v, col, uses_stat_mode in career_stat_bounds:
-        if min_v is not None and max_v is not None and min_v > max_v:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"min_{label} cannot exceed max_{label}",
-            )
-        expr = _career_stat_expr(col, per_game=per_game and uses_stat_mode)
-        if min_v is not None:
-            having_clauses.append(expr >= min_v)
-        if max_v is not None:
-            having_clauses.append(expr <= max_v)
-    if having_clauses:
-        career_subq = (
-            select(PlayerSeasonStat.player_id)
-            # "Career" means regular season; postseason rows live in the same table.
-            .where(PlayerSeasonStat.is_postseason.is_(False))
-            .group_by(PlayerSeasonStat.player_id)
-            .having(and_(*having_clauses))
+    try:
+        stmt = apply_player_stat_filters(
+            stmt,
+            PlayerStatFilters(
+                stat_mode=stat_mode,
+                pts=StatRange(min=min_pts, max=max_pts),
+                trb=StatRange(min=min_trb, max=max_trb),
+                ast=StatRange(min=min_ast, max=max_ast),
+                stl=StatRange(min=min_stl, max=max_stl),
+                blk=StatRange(min=min_blk, max=max_blk),
+                games=StatRange(min=min_games, max=max_games),
+                fg_pct=StatRange(min=percent_to_rate(min_fg_pct), max=percent_to_rate(max_fg_pct)),
+                fg3_pct=StatRange(min=percent_to_rate(min_fg3_pct), max=percent_to_rate(max_fg3_pct)),
+                ft_pct=StatRange(min=percent_to_rate(min_ft_pct), max=percent_to_rate(max_ft_pct)),
+            ),
         )
-        stmt = stmt.where(Player.id.in_(career_subq))
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
     # Players database sends sort_by explicitly (default name). Draft pool omits it to
     # keep Hall of Fame / longest-career ordering for the spin animation.

@@ -9,7 +9,7 @@ import { useTurnTabIndicator } from "@/hooks/useTurnTabIndicator";
 import { backendGet, backendPost } from "@/lib/backendClient";
 import { unwrapPlayerList, type PlayerAward, type PlayerSeasonStatsResponse } from "@/lib/playerTypes";
 import type { Draft } from "@/lib/types";
-import type { DraftRules } from "@/lib/draftRules";
+import { appendStatFilterParams, normalizeDraftRules, rulesHaveStatConstraints, type DraftRules } from "@/lib/draftRules";
 import { DraftLobbyHeader } from "@/components/draft-lobby/DraftLobbyHeader";
 import { DraftSideColumn } from "@/components/draft-lobby/DraftSideColumn";
 import { awardCountsFromRows, countingTotalsFromAggregate } from "@/components/draft-lobby/DraftPlayerStats";
@@ -76,7 +76,7 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
     async function run() {
       if (!draft) return;
       try {
-        const rulesFromDraft = (draft.draft_type?.rules ?? null) as DraftRules | null;
+        const rulesFromDraft = normalizeDraftRules((draft.draft_type?.rules ?? null) as Partial<DraftRules> | null);
         if (!cancelled) setRules(rulesFromDraft);
       } catch {
         if (!cancelled) setRules(null);
@@ -296,13 +296,18 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
       typeof rules?.min_team_stints === "number" ||
       typeof rules?.max_team_stints === "number" ||
       rules?.allow_active === false ||
-      rules?.allow_retired === false,
+      rules?.allow_retired === false ||
+      rulesHaveStatConstraints(rules),
   );
 
   const allowActiveRule = rules?.allow_active ?? true;
   const allowRetiredRule = rules?.allow_retired ?? true;
   const minTeamStintsRule = rules?.min_team_stints ?? null;
   const maxTeamStintsRule = rules?.max_team_stints ?? null;
+  const statModeRule = rules?.stat_mode ?? "per_game";
+  const careerStatBoundsRule = rules?.career_stat_bounds ?? null;
+  const shootingBoundsRule = rules?.shooting_bounds ?? null;
+  const accoladeBoundsRule = rules?.accolade_bounds ?? null;
 
   const eligibilityConstraints = useMemo<EligibilityConstraint[] | null>(() => {
     if (!started) return null;
@@ -317,6 +322,10 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
         allowRetired: allowRetiredRule,
         minTeamStints: minTeamStintsRule,
         maxTeamStints: maxTeamStintsRule,
+        statMode: statModeRule,
+        careerStatBounds: careerStatBoundsRule,
+        shootingBounds: shootingBoundsRule,
+        accoladeBounds: accoladeBoundsRule,
       }));
       return normalized.length ? normalized : null;
     }
@@ -335,6 +344,10 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
         allowRetired: allowRetiredRule,
         minTeamStints: minTeamStintsRule,
         maxTeamStints: maxTeamStintsRule,
+        statMode: statModeRule,
+        careerStatBounds: careerStatBoundsRule,
+        shootingBounds: shootingBoundsRule,
+        accoladeBounds: accoladeBoundsRule,
       },
     ];
   }, [
@@ -350,6 +363,10 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
     allowRetiredRule,
     minTeamStintsRule,
     maxTeamStintsRule,
+    statModeRule,
+    careerStatBoundsRule,
+    shootingBoundsRule,
+    accoladeBoundsRule,
   ]);
 
   const constraintReady = !hasAnyConstraintRule || Boolean(eligibilityConstraints?.length);
@@ -639,6 +656,12 @@ export function DraftLobbyClient({ draftRef }: { draftRef: string }) {
           if (c.allowRetired === false) params.set("include_retired", "false");
           if (c.minTeamStints != null) params.set("min_team_stints", String(c.minTeamStints));
           if (c.maxTeamStints != null) params.set("max_team_stints", String(c.maxTeamStints));
+          appendStatFilterParams(params, {
+            statMode: c.statMode,
+            careerStatBounds: c.careerStatBounds,
+            shootingBounds: c.shootingBounds,
+            accoladeBounds: c.accoladeBounds,
+          });
           const token = await getToken().catch(() => null);
           const data = unwrapPlayerList(
             await backendGet<PlayerSearchResult[] | { items: PlayerSearchResult[] }>(

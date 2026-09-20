@@ -7,7 +7,7 @@ import { useAuth } from "@clerk/nextjs";
 import { AppShell } from "@/components/AppShell";
 import { DraftRulesBuilder } from "@/components/DraftRulesBuilder";
 import { backendGet, backendPatch } from "@/lib/backendClient";
-import { defaultDraftRules, type DraftRules } from "@/lib/draftRules";
+import { defaultDraftRules, normalizeDraftRules, type DraftRules } from "@/lib/draftRules";
 import type { DraftType } from "@/lib/types";
 
 export default function DraftTypeEditPage() {
@@ -37,7 +37,7 @@ export default function DraftTypeEditPage() {
           setName(dt.name ?? "");
           setDescription(dt.description ?? "");
           setIsPublic(Boolean(dt.is_public));
-          setRules({ ...defaultDraftRules(), ...((dt.rules as Partial<DraftRules>) ?? {}) });
+          setRules(normalizeDraftRules((dt.rules as Partial<DraftRules>) ?? {}));
         }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load draft type.");

@@ -23,6 +23,9 @@ export function countingTotalsFromAggregate(
     stl: totals.stl ?? null,
     blk: totals.blk ?? null,
     games: totals.games ?? null,
+    fg_pct: totals.fg_pct ?? null,
+    fg3_pct: totals.fg3_pct ?? null,
+    ft_pct: totals.ft_pct ?? null,
   };
 }
 

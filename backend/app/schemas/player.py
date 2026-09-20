@@ -15,6 +15,9 @@ class PlayerCareerStatsOut(ORMBaseModel):
     stl: int | None = None
     blk: int | None = None
     games: int | None = None
+    fg_pct: float | None = None
+    fg3_pct: float | None = None
+    ft_pct: float | None = None
 
 
 class PlayerAwardCountsOut(ORMBaseModel):

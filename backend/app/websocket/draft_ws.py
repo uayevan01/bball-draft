@@ -11,6 +11,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.websocket.draft_manager import Role, draft_manager
 from app.database import SessionLocal
 from app.models import Draft, DraftPick, DraftType, Player, Team
+from app.services.player_filters import apply_player_stat_filters, filters_from_draft_rules
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.orm import joinedload
@@ -472,6 +473,13 @@ def _apply_active_retired_filters(stmt, *, rules: dict):
     return stmt
 
 
+def _apply_rules_stat_filters(stmt, *, rules: dict):
+    filters = filters_from_draft_rules(rules)
+    if not filters.active():
+        return stmt
+    return apply_player_stat_filters(stmt, filters)
+
+
 async def _count_viable_players_for_letter(
     *,
     drafted_player_ids: set[int],
@@ -506,6 +514,10 @@ async def _count_viable_players_for_letter(
     async with SessionLocal() as db:
         base_ids = select(Player.id).where(name_clause)
         base_ids = _apply_active_retired_filters(base_ids, rules=rules)
+        try:
+            base_ids = _apply_rules_stat_filters(base_ids, rules=rules)
+        except ValueError:
+            return 0
         if drafted_player_ids:
             base_ids = base_ids.where(Player.id.not_in(drafted_player_ids))
 
@@ -638,6 +650,10 @@ async def _roll_player(
     async with SessionLocal() as db:
         ids_stmt = select(Player.id).where(name_clause)
         ids_stmt = _apply_active_retired_filters(ids_stmt, rules=rules)
+        try:
+            ids_stmt = _apply_rules_stat_filters(ids_stmt, rules=rules)
+        except ValueError as exc:
+            raise RuntimeError("Invalid stats constraint (min > max)") from exc
         if drafted_player_ids:
             ids_stmt = ids_stmt.where(Player.id.not_in(drafted_player_ids))
         if exclude_ids:

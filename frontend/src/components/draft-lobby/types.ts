@@ -1,3 +1,4 @@
+import type { AccoladeBounds, CareerStatBounds, ShootingBounds, StatMode } from "@/lib/draftRules";
 import type { PlayerAwardCounts, PlayerCareerStats } from "@/lib/playerTypes";
 
 export type DraftPickWs = {
@@ -47,6 +48,10 @@ export type EligibilityConstraint = {
   allowRetired?: boolean | null;
   minTeamStints?: number | null;
   maxTeamStints?: number | null;
+  statMode?: StatMode | null;
+  careerStatBounds?: CareerStatBounds | null;
+  shootingBounds?: ShootingBounds | null;
+  accoladeBounds?: AccoladeBounds | null;
 };
 
 export type SpinPreviewTeam = {
