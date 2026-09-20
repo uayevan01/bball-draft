@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
 import {
   ACCOLADE_FIELDS,
@@ -625,32 +625,21 @@ function BoundNumberInput({
   placeholder: string;
   onCommit: (next: number | null) => void;
 }) {
-  const [text, setText] = useState(value == null ? "" : String(value));
-  const [focused, setFocused] = useState(false);
-  useEffect(() => {
-    if (!focused) setText(value == null ? "" : String(value));
-  }, [value, focused]);
+  const display = value == null ? "" : String(value);
+  const [text, setText] = useState(display);
+  const [prevValue, setPrevValue] = useState(value);
+  if (value !== prevValue) {
+    setPrevValue(value);
+    setText(display);
+  }
   return (
     <input
       className="h-9 w-full rounded-lg border border-black/10 bg-white px-2 text-sm dark:border-white/10 dark:bg-black"
       inputMode="decimal"
       value={text}
       placeholder={placeholder}
-      onFocus={() => setFocused(true)}
-      onBlur={() => {
-        setFocused(false);
-        onCommit(parseBoundValue(text, integer, maxValue));
-      }}
-      onChange={(e) => {
-        const raw = e.target.value;
-        setText(raw);
-        if (!raw.trim() || raw.trim() === ".") {
-          onCommit(null);
-          return;
-        }
-        if (raw.endsWith(".") || raw.endsWith("-")) return;
-        onCommit(parseBoundValue(raw, integer, maxValue));
-      }}
+      onBlur={() => onCommit(parseBoundValue(text, integer, maxValue))}
+      onChange={(e) => setText(e.target.value)}
     />
   );
 }
