@@ -2,11 +2,21 @@
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
+# Periodic Basketball Reference refresh:
+#   The web process stays lean; a separate scheduled Machine runs scripts/seed_refresh.sh.
+#   One-time create (from backend/, after `fly auth login` + a successful deploy):
+#     ./scripts/fly_seed_machine.sh create
+#   After each deploy that changes scraper code:
+#     ./scripts/fly_seed_machine.sh update
+#
 
 app = 'backend-falling-cloud-890'
 primary_region = 'ewr'
 
 [build]
+
+[processes]
+  app = 'uvicorn app.main:app --host 0.0.0.0 --port 8000'
 
 [http_service]
   internal_port = 8000
@@ -17,6 +27,7 @@ primary_region = 'ewr'
   processes = ['app']
 
 [[vm]]
+  processes = ['app']
   memory = '1gb'
   cpu_kind = 'shared'
   cpus = 1

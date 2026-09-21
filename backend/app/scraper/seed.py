@@ -3,9 +3,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, or_, select, text, update
+from sqlalchemy import ColumnElement, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 
 from app.database import SessionLocal
@@ -311,6 +311,22 @@ def _chunk(seq: Sequence, n: int) -> list[Sequence]:
     return [seq[i : i + n] for i in range(0, len(seq), n)]
 
 
+def _stale_cutoff(stale_days: int | None) -> datetime | None:
+    if stale_days is None:
+        return None
+    if stale_days < 1:
+        raise ValueError("--stale-days must be >= 1")
+    return datetime.now(timezone.utc) - timedelta(days=stale_days)
+
+
+def _needs_scrape(*columns, cutoff: datetime | None) -> ColumnElement[bool]:
+    """True when any timestamp is NULL, or (if cutoff set) older than cutoff."""
+    conditions = [col.is_(None) for col in columns]
+    if cutoff is not None:
+        conditions.extend(col < cutoff for col in columns)
+    return or_(*conditions)
+
+
 async def upsert_players_from_drafts(start_year: int, end_year: int) -> int:
     """
     Scrape NBA draft tables and merge draft_year / round / pick / drafted team onto players.
@@ -450,12 +466,19 @@ async def upsert_player_team_stints(
     *,
     bref_id: str | None = None,
     force: bool = False,
+    stale_days: int | None = None,
     commit_every_players: int = 10,
 ) -> int:
     """
     Populate PlayerTeamStint rows by scraping each player's BRef page and computing contiguous team ranges.
+
+    Without --force: only players missing stints/image timestamps (resume), plus any whose
+    timestamps are older than --stale-days when that flag is set.
     """
     print(f"[player-stints] using DATABASE_URL={settings.database_url}")
+    cutoff = None if force else _stale_cutoff(stale_days)
+    if cutoff is not None:
+        print(f"[player-stints] refreshing scrapes older than {stale_days} day(s) (before {cutoff.isoformat()})")
 
     async with SessionLocal() as session:
         # Backfill: for retired players, a NULL stint end_year should never exist
@@ -467,11 +490,14 @@ async def upsert_player_team_stints(
         # Resume by default:
         # - process players we haven't attempted stints for
         # - OR players we haven't attempted image scraping for
+        # - OR (with --stale-days) players whose scrape timestamps are older than the cutoff
         stmt = select(Player.id, Player.bref_id).where(Player.bref_id.is_not(None))
         if bref_id:
             stmt = stmt.where(Player.bref_id == bref_id)
         elif not force:
-            stmt = stmt.where(or_(Player.stints_scraped_at.is_(None), Player.image_scraped_at.is_(None)))
+            stmt = stmt.where(
+                _needs_scrape(Player.stints_scraped_at, Player.image_scraped_at, cutoff=cutoff)
+            )
         stmt = stmt.order_by(Player.id.asc())
         if limit:
             stmt = stmt.limit(limit)
@@ -719,6 +745,7 @@ async def upsert_player_season_stats_and_awards(
     limit: int | None = None,
     bref_id: str | None = None,
     force: bool = False,
+    stale_days: int | None = None,
     commit_every_players: int = 10,
     do_stats: bool = True,
     do_awards: bool = True,
@@ -726,11 +753,20 @@ async def upsert_player_season_stats_and_awards(
     """
     Scrape player pages and upsert season stats and/or awards.
     Returns (stats_rows_upserted, award_rows_upserted) approximate counts.
+
+    Without --force: only players missing relevant timestamps (resume), plus any whose
+    timestamps are older than --stale-days when that flag is set.
     """
     if not do_stats and not do_awards:
         return 0, 0
 
     print(f"[player-stats/awards] using DATABASE_URL={settings.database_url}")
+    cutoff = None if force else _stale_cutoff(stale_days)
+    if cutoff is not None:
+        print(
+            f"[player-stats/awards] refreshing scrapes older than {stale_days} day(s) "
+            f"(before {cutoff.isoformat()})"
+        )
 
     async with SessionLocal() as session:
         abbr_to_team_id = await _team_abbr_map(session)
@@ -741,15 +777,15 @@ async def upsert_player_season_stats_and_awards(
         if bref_id:
             stmt = stmt.where(Player.bref_id == bref_id)
         elif not force:
-            conditions = []
+            columns = []
             if do_stats:
-                conditions.append(Player.stats_scraped_at.is_(None))
+                columns.append(Player.stats_scraped_at)
                 # Lets a postseason backfill resume over players already scraped for
                 # regular season, without forcing a full re-scrape.
-                conditions.append(Player.postseason_scraped_at.is_(None))
+                columns.append(Player.postseason_scraped_at)
             if do_awards:
-                conditions.append(Player.awards_scraped_at.is_(None))
-            stmt = stmt.where(or_(*conditions))
+                columns.append(Player.awards_scraped_at)
+            stmt = stmt.where(_needs_scrape(*columns, cutoff=cutoff))
         stmt = stmt.order_by(Player.id.asc())
         if limit:
             stmt = stmt.limit(limit)
@@ -906,6 +942,16 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=None, help="Optional limit (for testing) for certain seed modes")
     parser.add_argument("--bref-id", type=str, default=None, help="Only process one player by bref_id (e.g. jamesle01)")
     parser.add_argument("--force", action="store_true", help="Reprocess even if scrape timestamps are set")
+    parser.add_argument(
+        "--stale-days",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Also re-scrape players whose relevant *_scraped_at is older than N days "
+            "(ignored when --force is set). Useful for weekly refreshes without a full re-scrape."
+        ),
+    )
     parser.add_argument("--commit-every", type=int, default=10, help="Commit after N successful players (default: 10)")
     args = parser.parse_args()
 
@@ -931,6 +977,7 @@ def main() -> None:
                 limit=args.limit,
                 bref_id=args.bref_id,
                 force=args.force,
+                stale_days=args.stale_days,
                 commit_every_players=args.commit_every,
             )
             print(f"Inserted player team stints (approx): {n}")
@@ -940,6 +987,7 @@ def main() -> None:
                 limit=args.limit,
                 bref_id=args.bref_id,
                 force=args.force,
+                stale_days=args.stale_days,
                 commit_every_players=args.commit_every,
                 do_stats=bool(args.player_stats),
                 do_awards=bool(args.player_awards),

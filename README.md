@@ -60,7 +60,22 @@ python -m app.scraper.seed --all-players
 python -m app.scraper.seed --player-stints
 python -m app.scraper.seed --player-stats --player-awards
 # Optional: --bref-id jamesle01 --force --limit 10
+# Periodic refresh: --stale-days 14 (re-scrape players older than N days)
 ```
+
+### Fly.io scheduled seed refresh
+
+Production runs `scripts/seed_refresh.sh` on a weekly Fly Machine (upserts by `bref_id`; does not reshuffle IDs).
+
+```bash
+cd backend
+fly auth login
+./scripts/fly_seed_machine.sh create   # once; starts first run immediately
+./scripts/fly_seed_machine.sh update   # after deploys that change the scraper
+./scripts/fly_seed_machine.sh status
+```
+
+Tune with env on the Machine / script: `SEED_STALE_DAYS` (default 14), `SEED_CONCURRENCY`, `SEED_DRAFT_START`, `SEED_DRAFT_END`.
 
 ### 4) Start the frontend
 
