@@ -13,6 +13,7 @@ from app.config import settings
 from app.models import Award, Player, PlayerAward, PlayerSeasonStat, PlayerTeamStint, Season, Team
 from app.scraper.basketball_reference import scrape_all_players_index, scrape_drafts, scrape_teams, scrape_team_logo
 from app.scraper.basketball_reference import scrape_player_team_seasons, scrape_player_stats_and_awards, seasons_to_stints
+from app.scraper.basketball_reference import BRefPlayerBio
 
 try:
     from tqdm.auto import tqdm  # type: ignore[import-not-found]
@@ -311,6 +312,18 @@ def _chunk(seq: Sequence, n: int) -> list[Sequence]:
     return [seq[i : i + n] for i in range(0, len(seq), n)]
 
 
+def _redact_database_url(url: str) -> str:
+    """Strip credentials from a DB URL before logging."""
+    # postgresql+asyncpg://user:pass@host/db → postgresql+asyncpg://***@host/db
+    if "://" not in url:
+        return "***"
+    scheme, rest = url.split("://", 1)
+    if "@" in rest:
+        rest = rest.split("@", 1)[1]
+        return f"{scheme}://***@{rest}"
+    return f"{scheme}://{rest}"
+
+
 def _stale_cutoff(stale_days: int | None) -> datetime | None:
     if stale_days is None:
         return None
@@ -325,6 +338,19 @@ def _needs_scrape(*columns, cutoff: datetime | None) -> ColumnElement[bool]:
     if cutoff is not None:
         conditions.extend(col < cutoff for col in columns)
     return or_(*conditions)
+
+
+def _player_bio_values(bio: BRefPlayerBio, *, scraped_at: datetime) -> dict:
+    return {
+        "height_inches": bio.height_inches,
+        "weight_lb": bio.weight_lb,
+        "college": bio.college,
+        "high_school": bio.high_school,
+        "birth_date": bio.birth_date,
+        "birth_place": bio.birth_place,
+        "shoots": bio.shoots,
+        "bio_scraped_at": scraped_at,
+    }
 
 
 async def upsert_players_from_drafts(start_year: int, end_year: int) -> int:
@@ -475,7 +501,7 @@ async def upsert_player_team_stints(
     Without --force: only players missing stints/image timestamps (resume), plus any whose
     timestamps are older than --stale-days when that flag is set.
     """
-    print(f"[player-stints] using DATABASE_URL={settings.database_url}")
+    print(f"[player-stints] using DATABASE_URL={_redact_database_url(settings.database_url)}")
     cutoff = None if force else _stale_cutoff(stale_days)
     if cutoff is not None:
         print(f"[player-stints] refreshing scrapes older than {stale_days} day(s) (before {cutoff.isoformat()})")
@@ -490,13 +516,19 @@ async def upsert_player_team_stints(
         # Resume by default:
         # - process players we haven't attempted stints for
         # - OR players we haven't attempted image scraping for
+        # - OR players we haven't scraped bio for
         # - OR (with --stale-days) players whose scrape timestamps are older than the cutoff
         stmt = select(Player.id, Player.bref_id).where(Player.bref_id.is_not(None))
         if bref_id:
             stmt = stmt.where(Player.bref_id == bref_id)
         elif not force:
             stmt = stmt.where(
-                _needs_scrape(Player.stints_scraped_at, Player.image_scraped_at, cutoff=cutoff)
+                _needs_scrape(
+                    Player.stints_scraped_at,
+                    Player.image_scraped_at,
+                    Player.bio_scraped_at,
+                    cutoff=cutoff,
+                )
             )
         stmt = stmt.order_by(Player.id.asc())
         if limit:
@@ -505,14 +537,14 @@ async def upsert_player_team_stints(
 
         sem = asyncio.Semaphore(max(1, concurrency))
 
-        async def _one(player_id: int, bref_id: str) -> list[dict]:
+        async def _one(player_id: int, bref_id: str) -> tuple[list[dict], BRefPlayerBio | None, str | None]:
             async with sem:
                 # Determine active vs retired so we don't mark the final stint as "current" for retired players.
                 player_ret = (
                     await session.execute(select(Player.retirement_year).where(Player.id == player_id))
                 ).scalar_one_or_none()
                 is_active = player_ret is None
-                seasons, headshot_url = await scrape_player_team_seasons(bref_id)
+                seasons, headshot_url, bio = await scrape_player_team_seasons(bref_id)
                 stints = seasons_to_stints(bref_id, seasons, is_active=is_active)
                 out: list[dict] = []
                 for s in stints:
@@ -529,9 +561,7 @@ async def upsert_player_team_stints(
                             "end_year": s.end_year,
                         }
                     )
-                if headshot_url:
-                    out.append({"player_id": player_id, "image_url": headshot_url})
-                return out
+                return out, bio, headshot_url
 
         total_processed_players = 0
         total_inserted_stints = 0
@@ -544,6 +574,7 @@ async def upsert_player_team_stints(
         # Incremental commit so you can restart safely.
         batch_values: list[dict] = []
         batch_image_updates: dict[int, str] = {}
+        batch_bio_updates: dict[int, BRefPlayerBio] = {}
         batch_player_ids: list[int] = []
         commit_every_players = max(1, commit_every_players)
 
@@ -552,12 +583,12 @@ async def upsert_player_team_stints(
             if not bref_id:
                 continue
             try:
-                values = await _one(player_id, bref_id)
-                for v in values:
-                    if "image_url" in v:
-                        batch_image_updates[player_id] = v["image_url"]
-                    else:
-                        batch_values.append(v)
+                values, bio, headshot_url = await _one(player_id, bref_id)
+                batch_values.extend(values)
+                if headshot_url:
+                    batch_image_updates[player_id] = headshot_url
+                if bio is not None:
+                    batch_bio_updates[player_id] = bio
                 batch_player_ids.append(player_id)
             except Exception as e:  # pylint: disable=broad-exception-caught
                 errors += 1
@@ -580,24 +611,22 @@ async def upsert_player_team_stints(
                     )
                     await session.execute(stmt_ins)
                     total_inserted_stints += len(batch_values)
-                if batch_image_updates:
-                    for pid, url in batch_image_updates.items():
-                        await session.execute(
-                            update(Player).where(Player.id == pid).values(image_url=url)
-                        )
-                # Mark players as attempted (even if they had 0 stints); this enables true resume.
-                await session.execute(
-                    update(Player)
-                    .where(Player.id.in_(batch_player_ids))
-                    .values(
-                        stints_scraped_at=datetime.now(timezone.utc),
-                        image_scraped_at=datetime.now(timezone.utc),
-                    )
-                )
+                now = datetime.now(timezone.utc)
+                for pid in batch_player_ids:
+                    values = {
+                        "stints_scraped_at": now,
+                        "image_scraped_at": now,
+                    }
+                    if pid in batch_image_updates:
+                        values["image_url"] = batch_image_updates[pid]
+                    if pid in batch_bio_updates:
+                        values.update(_player_bio_values(batch_bio_updates[pid], scraped_at=now))
+                    await session.execute(update(Player).where(Player.id == pid).values(**values))
                 await session.commit()
                 total_processed_players += len(batch_player_ids)
                 batch_values.clear()
                 batch_image_updates.clear()
+                batch_bio_updates.clear()
                 batch_player_ids.clear()
 
         # Flush tail
@@ -610,17 +639,17 @@ async def upsert_player_team_stints(
                 )
                 await session.execute(stmt_ins)
                 total_inserted_stints += len(batch_values)
-            if batch_image_updates:
-                for pid, url in batch_image_updates.items():
-                    await session.execute(update(Player).where(Player.id == pid).values(image_url=url))
-            await session.execute(
-                update(Player)
-                .where(Player.id.in_(batch_player_ids))
-                .values(
-                    stints_scraped_at=datetime.now(timezone.utc),
-                    image_scraped_at=datetime.now(timezone.utc),
-                )
-            )
+            now = datetime.now(timezone.utc)
+            for pid in batch_player_ids:
+                values = {
+                    "stints_scraped_at": now,
+                    "image_scraped_at": now,
+                }
+                if pid in batch_image_updates:
+                    values["image_url"] = batch_image_updates[pid]
+                if pid in batch_bio_updates:
+                    values.update(_player_bio_values(batch_bio_updates[pid], scraped_at=now))
+                await session.execute(update(Player).where(Player.id == pid).values(**values))
             await session.commit()
             total_processed_players += len(batch_player_ids)
 
@@ -760,7 +789,7 @@ async def upsert_player_season_stats_and_awards(
     if not do_stats and not do_awards:
         return 0, 0
 
-    print(f"[player-stats/awards] using DATABASE_URL={settings.database_url}")
+    print(f"[player-stats/awards] using DATABASE_URL={_redact_database_url(settings.database_url)}")
     cutoff = None if force else _stale_cutoff(stale_days)
     if cutoff is not None:
         print(
@@ -777,7 +806,7 @@ async def upsert_player_season_stats_and_awards(
         if bref_id:
             stmt = stmt.where(Player.bref_id == bref_id)
         elif not force:
-            columns = []
+            columns = [Player.bio_scraped_at]
             if do_stats:
                 columns.append(Player.stats_scraped_at)
                 # Lets a postseason backfill resume over players already scraped for
@@ -808,6 +837,7 @@ async def upsert_player_season_stats_and_awards(
 
     batch_stats: list[dict] = []
     batch_awards: list[dict] = []
+    batch_bio_updates: dict[int, BRefPlayerBio] = {}
     batch_player_ids: list[int] = []
     commit_every_players = max(1, commit_every_players)
     errors = 0
@@ -834,24 +864,29 @@ async def upsert_player_season_stats_and_awards(
                 await session.execute(stmt_ins)
                 total_awards += len(batch_awards)
 
-            values: dict = {}
             now = datetime.now(timezone.utc)
-            if do_stats:
-                values["stats_scraped_at"] = now
-                values["postseason_scraped_at"] = now
-            if do_awards:
-                values["awards_scraped_at"] = now
-            await session.execute(update(Player).where(Player.id.in_(batch_player_ids)).values(**values))
+            for pid in batch_player_ids:
+                values: dict = {}
+                if do_stats:
+                    values["stats_scraped_at"] = now
+                    values["postseason_scraped_at"] = now
+                if do_awards:
+                    values["awards_scraped_at"] = now
+                if pid in batch_bio_updates:
+                    values.update(_player_bio_values(batch_bio_updates[pid], scraped_at=now))
+                if values:
+                    await session.execute(update(Player).where(Player.id == pid).values(**values))
             await session.commit()
             batch_stats.clear()
             batch_awards.clear()
+            batch_bio_updates.clear()
             batch_player_ids.clear()
 
         for i, (player_id, player_bref_id) in enumerate(players, 1):
             if not player_bref_id:
                 continue
             try:
-                stats, awards = await _scrape(player_bref_id)
+                stats, awards, bio = await _scrape(player_bref_id)
                 now = datetime.now(timezone.utc)
                 start_years = [s.start_year for s in stats] + [a.start_year for a in awards]
                 season_ids = await _ensure_seasons(session, start_years)
@@ -894,6 +929,7 @@ async def upsert_player_season_stats_and_awards(
                                 "team_id": team_id,
                             }
                         )
+                batch_bio_updates[player_id] = bio
                 batch_player_ids.append(player_id)
             except Exception:  # pylint: disable=broad-exception-caught
                 errors += 1

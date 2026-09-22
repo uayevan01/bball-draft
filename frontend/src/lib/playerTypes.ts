@@ -47,6 +47,13 @@ export type PlayerListItem = {
   retirement_year?: number | null;
   hall_of_fame: boolean;
   position?: string | null;
+  height_inches?: number | null;
+  weight_lb?: number | null;
+  college?: string | null;
+  high_school?: string | null;
+  birth_date?: string | null;
+  birth_place?: string | null;
+  shoots?: string | null;
   image_url?: string | null;
   latest_team_id?: number | null;
   career_stats?: PlayerCareerStats | null;
@@ -61,6 +68,36 @@ export type PlayerListPage<T = PlayerListItem> = {
 export function unwrapPlayerList<T>(data: T[] | { items: T[]; total?: number }): { items: T[]; total: number | null } {
   if (Array.isArray(data)) return { items: data, total: null };
   return { items: data.items ?? [], total: typeof data.total === "number" ? data.total : null };
+}
+
+/** Format stored inches as feet-inches, e.g. 81 → 6'9". */
+export function formatHeightInches(heightInches: number | null | undefined): string | null {
+  if (heightInches == null || heightInches <= 0) return null;
+  const feet = Math.floor(heightInches / 12);
+  const inches = heightInches % 12;
+  return `${feet}'${inches}"`;
+}
+
+/** Compact bio line for player detail header. */
+export function formatPlayerBioLine(player: {
+  height_inches?: number | null;
+  weight_lb?: number | null;
+  college?: string | null;
+  high_school?: string | null;
+  shoots?: string | null;
+  birth_date?: string | null;
+  birth_place?: string | null;
+}): string | null {
+  const parts: string[] = [];
+  const height = formatHeightInches(player.height_inches);
+  if (height) parts.push(height);
+  if (player.weight_lb != null) parts.push(`${player.weight_lb} lb`);
+  if (player.college) parts.push(player.college);
+  else if (player.high_school) parts.push(player.high_school);
+  if (player.shoots) parts.push(`shoots ${player.shoots}`);
+  const bornBits = [player.birth_date, player.birth_place].filter(Boolean);
+  if (bornBits.length) parts.push(`born ${bornBits.join(", ")}`);
+  return parts.length > 0 ? parts.join(" · ") : null;
 }
 
 export type PlayerDetail = PlayerListItem & {

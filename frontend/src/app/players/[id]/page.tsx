@@ -17,6 +17,7 @@ import type {
   SeasonScope,
   Team,
 } from "@/lib/playerTypes";
+import { formatPlayerBioLine } from "@/lib/playerTypes";
 import {
   awardYearFromSeason,
   formatCareerYears,
@@ -860,6 +861,17 @@ export default function PlayerDetailPage() {
                   {formatDraftYear(player.draft_year, player.draft_round, player.draft_pick)}
                 </div>
               </div>
+              {(() => {
+                const bioLine = formatPlayerBioLine(player);
+                return bioLine ? (
+                  <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">{bioLine}</p>
+                ) : null;
+              })()}
+              {player.high_school && player.college ? (
+                <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+                  High school: {player.high_school}
+                </p>
+              ) : null}
               {awardGroups.length > 0 ? (
                 <div className="mt-4 flex flex-wrap gap-2 text-sm">
                   {awardGroups.map((g) => (

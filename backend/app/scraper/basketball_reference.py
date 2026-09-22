@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import asyncio
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
@@ -133,6 +134,17 @@ class BRefAwardRow:
     team_abbreviation: str | None = None
 
 
+@dataclass(frozen=True)
+class BRefPlayerBio:
+    height_inches: int | None = None
+    weight_lb: int | None = None
+    college: str | None = None
+    high_school: str | None = None
+    birth_date: date | None = None
+    birth_place: str | None = None
+    shoots: str | None = None
+
+
 # BRef Awards-column tokens we persist (voting ranks only when place == 1).
 _AWARD_TOKEN_TO_SLUG: dict[str, str] = {
     "AS": "all_star",
@@ -157,6 +169,120 @@ def _clean(text: str | None) -> str | None:
         return None
     s = re.sub(r"\s+", " ", text).strip()
     return s or None
+
+
+def _parse_height_inches(text: str | None) -> int | None:
+    """Parse BRef height like '6-9' or '6′9″' into total inches."""
+    if not text:
+        return None
+    m = re.search(r"(\d)\s*[-′']\s*(\d{1,2})", text)
+    if not m:
+        return None
+    feet, inches = int(m.group(1)), int(m.group(2))
+    if inches >= 12:
+        return None
+    return feet * 12 + inches
+
+
+def _parse_weight_lb(text: str | None) -> int | None:
+    if not text:
+        return None
+    m = re.search(r"(\d{2,3})\s*lb", text, flags=re.IGNORECASE)
+    return int(m.group(1)) if m else None
+
+
+def _meta_label_value(p, label: str) -> str | None:
+    """Extract the value after a <strong>Label:</strong> in a meta paragraph."""
+    strong = p.find("strong")
+    if strong is None:
+        return None
+    strong_text = _clean(strong.get_text()) or ""
+    if not strong_text.lower().startswith(label.lower()):
+        return None
+    # Prefer link texts for College (may list multiple schools).
+    if label.lower() == "college":
+        links = [_clean(a.get_text()) for a in p.find_all("a")]
+        colleges = [c for c in links if c]
+        if colleges:
+            return "; ".join(colleges)
+    # Clone-ish: take text after the strong label.
+    full = _clean(p.get_text(" ", strip=True)) or ""
+    # Strip leading "Label:" / "Label"
+    cleaned = re.sub(rf"^{re.escape(label)}\s*:?\s*", "", full, flags=re.IGNORECASE).strip()
+    return cleaned or None
+
+
+def parse_player_bio(soup: BeautifulSoup) -> BRefPlayerBio:
+    """Parse height/weight/schools/birth/shoots from div#meta on a player page."""
+    meta = soup.select_one("div#meta")
+    if meta is None:
+        return BRefPlayerBio()
+
+    height_inches = None
+    weight_lb = None
+    college = None
+    high_school = None
+    birth_date_val: date | None = None
+    birth_place = None
+    shoots = None
+
+    for p in meta.select("p"):
+        text = _clean(p.get_text(" ", strip=True)) or ""
+
+        if height_inches is None or weight_lb is None:
+            # Typical: <span>6-9</span>, <span>250lb</span> (206cm, 113kg)
+            spans = [_clean(s.get_text()) for s in p.select("span")]
+            spans = [s for s in spans if s]
+            for s in spans:
+                if height_inches is None:
+                    height_inches = _parse_height_inches(s)
+                if weight_lb is None:
+                    weight_lb = _parse_weight_lb(s)
+            if height_inches is None:
+                height_inches = _parse_height_inches(text)
+            if weight_lb is None:
+                weight_lb = _parse_weight_lb(text)
+
+        if shoots is None and re.search(r"\bShoots\b", text, flags=re.IGNORECASE):
+            m = re.search(r"Shoots:\s*(Left|Right)", text, flags=re.IGNORECASE)
+            if m:
+                shoots = m.group(1).title()
+
+        if birth_date_val is None or birth_place is None:
+            birth_span = p.select_one("#necro-birth, span[data-birth]")
+            if birth_span is not None:
+                raw = birth_span.get("data-birth")
+                if raw:
+                    try:
+                        y, mo, d = (int(x) for x in str(raw).split("-")[:3])
+                        birth_date_val = date(y, mo, d)
+                    except (TypeError, ValueError):
+                        birth_date_val = None
+                # Place is usually the next sibling span: "in Akron, Ohio us"
+                place_span = birth_span.find_next_sibling("span")
+                if place_span is not None:
+                    place_text = _clean(place_span.get_text(" ", strip=True)) or ""
+                    place_text = re.sub(r"^in\s+", "", place_text, flags=re.IGNORECASE)
+                    # Drop trailing 2-letter country code when preceded by space ("Ohio us")
+                    place_text = re.sub(r"\s+[a-z]{2}$", "", place_text).strip()
+                    birth_place = place_text or None
+
+        if college is None:
+            college = _meta_label_value(p, "College")
+        if high_school is None:
+            hs = _meta_label_value(p, "High School")
+            if hs:
+                high_school = hs
+
+    return BRefPlayerBio(
+        height_inches=height_inches,
+        weight_lb=weight_lb,
+        college=college,
+        high_school=high_school,
+        birth_date=birth_date_val,
+        birth_place=birth_place,
+        shoots=shoots,
+    )
 
 
 @retry(
@@ -503,9 +629,12 @@ def _season_text_to_start_year(season_text: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
-async def scrape_player_team_seasons(bref_id: str) -> tuple[dict[int, str], str | None]:
+async def scrape_player_team_seasons(
+    bref_id: str,
+) -> tuple[dict[int, str], str | None, BRefPlayerBio]:
     """
-    Returns mapping: season_start_year -> team_abbreviation (best-effort).
+    Returns mapping: season_start_year -> team_abbreviation (best-effort),
+    headshot URL, and bio fields from div#meta.
 
     For seasons with multiple teams, we pick the team row with the most games played.
     """
@@ -517,6 +646,7 @@ async def scrape_player_team_seasons(bref_id: str) -> tuple[dict[int, str], str 
         html = await _get(client, url)
 
     soup = BeautifulSoup(html, "lxml")
+    bio = parse_player_bio(soup)
     headshot_url = None
     img = soup.select_one("div#meta img")
     if img and img.get("src"):
@@ -533,7 +663,7 @@ async def scrape_player_team_seasons(bref_id: str) -> tuple[dict[int, str], str 
         if table is not None:
             break
     if table is None:
-        return {}, headshot_url
+        return {}, headshot_url, bio
 
     # For each season, choose best team based on max games (exclude TOT).
     best: dict[int, tuple[str, int]] = {}  # season_start -> (team_abbr, games)
@@ -571,7 +701,7 @@ async def scrape_player_team_seasons(bref_id: str) -> tuple[dict[int, str], str 
             best[start_year] = (team_abbr.upper(), games)
 
     seasons = {season: team for season, (team, _games) in best.items()}
-    return seasons, headshot_url
+    return seasons, headshot_url, bio
 
 
 def seasons_to_stints(bref_id: str, seasons: dict[int, str], *, is_active: bool) -> list[BRefPlayerStintRow]:
@@ -1015,9 +1145,9 @@ def _primary_team_by_season(totals_rows: list[dict[str, Any]]) -> dict[int, str]
 
 async def scrape_player_stats_and_awards(
     bref_id: str,
-) -> tuple[list[BRefSeasonStatRow], list[BRefAwardRow]]:
+) -> tuple[list[BRefSeasonStatRow], list[BRefAwardRow], BRefPlayerBio]:
     """
-    Fetch a player page once and return per-team season totals (+ advanced) and awards.
+    Fetch a player page once and return per-team season totals (+ advanced), awards, and bio.
     Stats cover both regular season and postseason, tagged via is_postseason.
     Skips BRef TOT rows.
     """
@@ -1028,6 +1158,7 @@ async def scrape_player_stats_and_awards(
         html = await _get(client, url)
 
     soup = BeautifulSoup(html, "lxml")
+    bio = parse_player_bio(soup)
     totals_rows, tot_awards = _parse_totals_rows(soup, bref_id)
     advanced = _parse_advanced_by_key(soup)
     # Postseason lives on the same page, so this costs no extra request.
@@ -1101,16 +1232,16 @@ async def scrape_player_stats_and_awards(
             )
         )
 
-    return stats, award_rows
+    return stats, award_rows, bio
 
 
 async def scrape_player_season_stats(bref_id: str) -> list[BRefSeasonStatRow]:
-    stats, _awards = await scrape_player_stats_and_awards(bref_id)
+    stats, _awards, _bio = await scrape_player_stats_and_awards(bref_id)
     return stats
 
 
 async def scrape_player_awards(bref_id: str) -> list[BRefAwardRow]:
-    _stats, awards = await scrape_player_stats_and_awards(bref_id)
+    _stats, awards, _bio = await scrape_player_stats_and_awards(bref_id)
     return awards
 
 

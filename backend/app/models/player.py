@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import ForeignKey, Integer, String, UniqueConstraint
-from sqlalchemy import Boolean, DateTime, func
+from sqlalchemy import Boolean, Date, DateTime
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -30,6 +30,17 @@ class Player(Base):
     retirement_year: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     hall_of_fame: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
     position: Mapped[str | None] = mapped_column(String(30), nullable=True, index=True)
+
+    # Bio from Basketball Reference player meta (height stored in inches).
+    height_inches: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    weight_lb: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    college: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    high_school: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    birth_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    birth_place: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    shoots: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    bio_scraped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+
     stints_scraped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     stats_scraped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     postseason_scraped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
@@ -48,6 +59,3 @@ class Player(Base):
     player_awards: Mapped[list["PlayerAward"]] = relationship(
         "PlayerAward", back_populates="player", cascade="all, delete-orphan"
     )
-
-
-

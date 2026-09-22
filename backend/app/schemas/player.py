@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date
+
 from pydantic import Field
 
 from app.schemas.base import ORMBaseModel
@@ -46,6 +48,13 @@ class PlayerOut(ORMBaseModel):
     retirement_year: int | None = None
     hall_of_fame: bool = False
     position: str | None = None
+    height_inches: int | None = None
+    weight_lb: int | None = None
+    college: str | None = None
+    high_school: str | None = None
+    birth_date: date | None = None
+    birth_place: str | None = None
+    shoots: str | None = None
     image_url: str | None = None
     latest_team_id: int | None = None
     career_stats: PlayerCareerStatsOut | None = None
@@ -63,5 +72,3 @@ class PlayerDetailOut(PlayerOut):
 class PlayerListPageOut(ORMBaseModel):
     items: list[PlayerOut]
     total: int
-
-
